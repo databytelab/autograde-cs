@@ -1,0 +1,1 @@
+# Similarity detection tests — Stage 6
