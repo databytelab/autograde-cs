@@ -1,6 +1,311 @@
 """
-Seeds the database with demo courses, assignments, and sample grades.
-Useful for testing the frontend without real submissions.
-Run: py -3.11 scripts/seed_demo_data.py
+Seed a demo course, assignment, and submissions.
+
+Useful for trying the UI without hunting for real student files, and for
+reproducing a bug against a known dataset.
+
+    python scripts/seed_demo_data.py
+    python scripts/seed_demo_data.py --reset        # rebuild from scratch
+    python scripts/seed_demo_data.py --fake-grades  # placeholder grades, no API
+    python scripts/seed_demo_data.py --grade        # real grading (needs a key)
+
+Seeding and the similarity scan work with no API key. Only --grade needs a
+real ANTHROPIC_API_KEY in .env; --fake-grades writes obviously-placeholder
+results so the review and export screens have something to show.
 """
-# Populated in Stage 9
+from __future__ import annotations
+
+import argparse
+import shutil
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.database import Base, SessionLocal, engine  # noqa: E402
+from backend.models import (  # noqa: E402
+    Assignment,
+    Course,
+    GradeResult,
+    Submission,
+    User,
+    UserRole,
+)
+from backend.parsers import ParseError  # noqa: E402
+from backend.services.grading_service import (  # noqa: E402
+    assignment_stats,
+    grade_assignment,
+    parse_and_cache,
+    scan_similarity,
+)
+from backend.utils.auth_utils import hash_password  # noqa: E402
+from backend.utils.file_utils import upload_root  # noqa: E402
+
+SAMPLES = PROJECT_ROOT / "tests" / "sample_submissions"
+
+# `.local` and `.test` are reserved special-use domains that EmailStr
+# rejects, so a demo account on one of those could never sign in.
+DEMO_EMAIL = "demo@university.edu"
+DEMO_PASSWORD = "demo-password-123"
+
+DEMO_RUBRIC = {
+    "title": "HW3 - Linear Regression",
+    "criteria": [
+        {"id": "loading", "name": "Data loading",
+         "description": "Reads housing.csv with pandas and reports its shape.",
+         "max_points": 20, "keywords": ["read_csv", "shape"],
+         "requires_output": True},
+        {"id": "model", "name": "Model implementation",
+         "description": "Implements closed-form OLS correctly, using pinv "
+                        "rather than inv.",
+         "max_points": 40, "keywords": ["pinv", "fit"]},
+        {"id": "evaluation", "name": "Evaluation",
+         "description": "Reports R-squared on the data and states the value.",
+         "max_points": 20, "requires_output": True},
+        {"id": "writeup", "name": "Write-up",
+         "description": "Explains in prose what the result means.",
+         "max_points": 20},
+    ],
+    "grading_notes": "Strict on correctness, generous on style. Partial "
+                     "credit wherever the student showed understanding.",
+}
+
+# filename -> the student it belongs to
+DEMO_SUBMISSIONS = [
+    ("good_submission.ipynb", "Alice Chen", "alice.chen@university.edu"),
+    ("good_submission.html", "Eve Franklin", "eve.franklin@university.edu"),
+    ("good_submission.py", "Dan Ellis", "dan.ellis@university.edu"),
+    ("plagiarised.py", "Grace Hopper", "grace.hopper@university.edu"),
+    ("different.py", "Henry Ives", "henry.ives@university.edu"),
+    ("unrun_submission.ipynb", "Bob Smith", "bob.smith@university.edu"),
+    ("error_submission.ipynb", "Carol Diaz", "carol.diaz@university.edu"),
+    ("classic_submission.html", "Frank Green", "frank.green@university.edu"),
+    ("corrupt.ipynb", "Ivan Petrov", "ivan.petrov@university.edu"),
+]
+
+
+def _write_fake_grades(db, assignment) -> None:
+    """
+    Populate plausible grades without calling the API.
+
+    For demoing and for exercising the review/export screens when no
+    ANTHROPIC_API_KEY is available. These are placeholders, not real
+    judgements - every row is flagged `demo_data` so nobody mistakes one
+    for a graded result.
+    """
+    import random
+    from datetime import datetime
+
+    from backend.ai.grader import normalize_grade
+    from backend.services.rubric_service import validate_rubric
+
+    rubric = validate_rubric(assignment.rubric_json)
+    random.seed(20260829)   # reproducible demo data
+
+    for submission in assignment.submissions:
+        try:
+            parsed = parse_and_cache(db, submission)
+        except ParseError as exc:
+            print(f"    {submission.student_name:16} unparseable: {exc}")
+            continue
+
+        stats = parsed.get("stats", {})
+
+        criteria_results, flags = [], ["demo_data"]
+        for criterion in rubric["criteria"]:
+            share = random.uniform(0.62, 1.0)
+            # A notebook that was never run cannot earn output-dependent marks.
+            if criterion["requires_output"] and not stats.get("has_outputs"):
+                share = random.uniform(0.0, 0.35)
+            criteria_results.append({
+                "criterion_id": criterion["id"],
+                "name": criterion["name"],
+                "score": round(criterion["max_points"] * share, 1),
+                "max_score": criterion["max_points"],
+                "reasoning": "Placeholder reasoning generated by "
+                             "scripts/seed_demo_data.py.",
+                "feedback": "Placeholder feedback - not a real grade.",
+                "flags": [],
+            })
+
+        if stats.get("n_code_cells") and not stats.get("has_outputs"):
+            flags.append("no_outputs")
+        if parsed.get("errors"):
+            flags.append("runtime_error")
+
+        result = normalize_grade(
+            {"criteria_results": criteria_results,
+             "summary_feedback": "Placeholder summary written by the demo "
+                                 "seeder. Re-grade with a real API key to "
+                                 "replace it.",
+             "overall_flags": flags},
+            rubric,
+        )
+
+        grade = submission.grade_result or GradeResult(submission_id=submission.id)
+        grade.total_score = result["total_score"]
+        grade.total_possible = result["total_possible"]
+        grade.percentage = result["percentage"]
+        grade.letter_grade = result["letter_grade"]
+        grade.criteria_results = result["criteria_results"]
+        grade.flags = result["flags"]
+        grade.summary_feedback = result["summary_feedback"]
+        grade.ai_raw_output = {"note": "demo placeholder - no model was called"}
+        if grade not in db:
+            db.add(grade)
+
+        submission.status = "flagged" if result["flags"] else "graded"
+        submission.graded_at = datetime.utcnow()
+        db.commit()
+        print(f"    {submission.student_name:16} "
+              f"{result['total_score']:>6.1f}  {result['letter_grade']}")
+
+
+def reset(db) -> None:
+    """Remove any previous demo data, files included."""
+    user = db.query(User).filter(User.email == DEMO_EMAIL).first()
+    if user is None:
+        print("  nothing to reset")
+        return
+    for course in user.courses:
+        for assignment in course.assignments:
+            directory = upload_root() / str(assignment.id)
+            if directory.is_dir():
+                shutil.rmtree(directory, ignore_errors=True)
+    db.delete(user)
+    db.commit()
+    print("  removed the previous demo user and all its data")
+
+
+def seed(db, *, run_grading: bool) -> None:
+    if db.query(User).filter(User.email == DEMO_EMAIL).first():
+        print("Demo data already exists. Re-run with --reset to rebuild it.")
+        return
+
+    print("Creating the demo professor...")
+    user = User(
+        email=DEMO_EMAIL, name="Dr. Demo Professor",
+        password_hash=hash_password(DEMO_PASSWORD),
+        role=UserRole.professor,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    print(f"  {DEMO_EMAIL} / {DEMO_PASSWORD}")
+
+    course = Course(user_id=user.id, name="CS 229 Machine Learning",
+                    term="Fall 2025")
+    db.add(course)
+    db.commit()
+    db.refresh(course)
+    print(f"Created course: {course.name}")
+
+    assignment = Assignment(
+        course_id=course.id,
+        name="HW3 - Linear Regression",
+        description="Fit a linear model to the Boston housing data and "
+                    "report R-squared.",
+        rubric_json=DEMO_RUBRIC,
+        total_possible_points=100.0,
+        status="pending",
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    print(f"Created assignment: {assignment.name}")
+
+    target_dir = upload_root() / str(assignment.id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    print("Uploading sample submissions...")
+    for filename, student, email in DEMO_SUBMISSIONS:
+        source = SAMPLES / filename
+        if not source.exists():
+            print(f"  skipped {filename} (not found)")
+            continue
+
+        destination = target_dir / filename
+        shutil.copy2(source, destination)
+
+        suffix = source.suffix.lower()
+        file_type = "html" if suffix in (".html", ".htm") else suffix.lstrip(".")
+
+        db.add(Submission(
+            assignment_id=assignment.id,
+            student_name=student,
+            student_email=email,
+            original_filename=filename,
+            file_path=str(destination),
+            file_type=file_type,
+            file_size_bytes=destination.stat().st_size,
+            status="pending",
+        ))
+        print(f"  {student:16} {filename}")
+    db.commit()
+
+    if run_grading == "fake":
+        print("\nWriting placeholder grades (no API call)...")
+        _write_fake_grades(db, assignment)
+    elif run_grading:
+        print("\nGrading (this calls the Anthropic API once per submission)...")
+        summary = grade_assignment(db, assignment)
+        print(f"  graded={summary['graded']} failed={summary['failed']}")
+        for result in summary["results"]:
+            if result["ok"] and result.get("letter_grade"):
+                print(f"    {result['student_name']:16} "
+                      f"{result['total_score']:>6.1f}  {result['letter_grade']}")
+            elif not result["ok"]:
+                print(f"    {result['student_name']:16} FAILED: {result['error'][:70]}")
+    else:
+        print("\nSkipping grading (pass --grade to run it).")
+
+    print("\nRunning the similarity scan...")
+    flags = scan_similarity(db, assignment, threshold=0.6)
+    if not flags:
+        print("  no pairs above the threshold")
+    for flag in flags:
+        names = {
+            s.id: s.student_name
+            for s in db.query(Submission).filter(
+                Submission.id.in_([flag.submission_a_id, flag.submission_b_id])
+            ).all()
+        }
+        print(f"  {names.get(flag.submission_a_id)} <-> "
+              f"{names.get(flag.submission_b_id)}: "
+              f"{float(flag.similarity_score):.0%} ({flag.severity})")
+
+    stats = assignment_stats(db, assignment)
+    print("\nAssignment stats:")
+    for key in ("total_submissions", "graded", "errored", "flagged",
+                "mean_percentage"):
+        print(f"  {key:18} {stats[key]}")
+
+    print("\nDone. Sign in to the Streamlit app with:")
+    print(f"  {DEMO_EMAIL} / {DEMO_PASSWORD}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reset", action="store_true",
+                        help="Delete existing demo data first.")
+    parser.add_argument("--grade", action="store_true",
+                        help="Run the AI grader (needs ANTHROPIC_API_KEY).")
+    parser.add_argument("--fake-grades", action="store_true",
+                        help="Write placeholder grades with no API call, so "
+                             "the review and export screens have data to show.")
+    args = parser.parse_args()
+
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        if args.reset:
+            print("Resetting...")
+            reset(db)
+        seed(db, run_grading="fake" if args.fake_grades else args.grade)
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()

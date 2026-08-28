@@ -1,15 +1,63 @@
-# Docker Compose — populated in Stage 13
-version: "3.8"
+# AutoGrade CS - local/production stack
+#
+#   docker compose up --build
+#
+#   backend   http://localhost:8000/docs
+#   frontend  http://localhost:8501
+#
+# Copy .env.example to .env and fill in ANTHROPIC_API_KEY and SECRET_KEY
+# before starting. The default profile runs SQLite; `--profile postgres`
+# swaps in a real database.
+
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
     ports:
       - "8000:8000"
     env_file: .env
+    environment:
+      # Overridden by the postgres profile below.
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/autograde.db}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      # Student files and the SQLite database must outlive the container.
+      - uploads:/app/uploads
+      - data:/app/data
+    restart: unless-stopped
 
   frontend:
-    build: ./frontend_streamlit
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
     ports:
       - "8501:8501"
+    environment:
+      # Inside the compose network the backend answers to its service name.
+      AUTOGRADE_API_BASE: http://backend:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: autograde
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: autograde
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autograde"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  uploads:
+  data:
+  pgdata:

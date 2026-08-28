@@ -1,5 +1,291 @@
 """
 All LLM prompt templates in one place.
 Never scatter prompts across files.
+
+Three prompts live here:
+  GRADING_SYSTEM     - the grader's standing instructions
+  RUBRIC_EXTRACTION_SYSTEM - turns prose assignment text into rubric JSON
+  IMAGE_EVAL_SYSTEM  - evaluates plots/figures found in a submission
+
+Keeping them together also keeps them cacheable: the system prompt is
+byte-identical across every submission in a batch, so it becomes a
+prompt-cache prefix hit after the first call.
 """
-# Populated in Stage 5
+from __future__ import annotations
+
+import json
+from typing import Any
+
+# ---------------------------------------------------------------------
+# Grading
+# ---------------------------------------------------------------------
+GRADING_SYSTEM = """\
+You are an experienced computer-science teaching assistant grading a \
+student submission against a rubric supplied by the professor.
+
+How to grade:
+- Judge ONLY against the rubric criteria you are given. Do not invent \
+criteria, and do not deduct points for anything the rubric does not mention.
+- Award partial credit generously where the student demonstrated partial \
+understanding, and be strict where the rubric asks for a specific result.
+- Base correctness judgements on the code AND its recorded outputs. If a \
+criterion is marked `requires_output` and the relevant cell has no output, \
+the student cannot receive full credit for it.
+- Never award more than a criterion's `max_points`, and never award a \
+negative score.
+- Write feedback addressed to the student in the second person ("you"), \
+specific enough to act on. Point at the actual line, function, or cell.
+- Write reasoning addressed to the professor, explaining why you landed on \
+that score. This is the audit trail.
+
+Integrity flags - add these to a criterion's `flags` array only when you \
+have concrete evidence in the submission, never on a hunch:
+- "no_outputs"          the notebook was submitted without ever being run
+- "runtime_error"       an uncaught exception is recorded in the outputs
+- "incomplete"          the section is missing or left as a stub/TODO
+- "possible_ai_generated"  style markers strongly suggest generated code \
+(uniform exhaustive comments, unused defensive scaffolding, docstrings that \
+restate the prompt). State the evidence in `reasoning`.
+- "output_mismatch"     the printed output contradicts the code that \
+produced it, suggesting hand-edited outputs
+
+You must respond with a single JSON object and nothing else - no prose \
+before it, no markdown fence around it."""
+
+GRADING_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "criteria_results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "criterion_id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "score": {"type": "number"},
+                    "max_score": {"type": "number"},
+                    "reasoning": {"type": "string"},
+                    "feedback": {"type": "string"},
+                    "flags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "criterion_id", "name", "score",
+                    "max_score", "reasoning", "feedback", "flags",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "summary_feedback": {"type": "string"},
+        "overall_flags": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["criteria_results", "summary_feedback", "overall_flags"],
+    "additionalProperties": False,
+}
+
+
+def build_grading_user_prompt(
+    *,
+    assignment_name: str,
+    assignment_description: str | None,
+    rubric: dict[str, Any],
+    parsed: dict[str, Any],
+    expected_solution: dict[str, Any] | None = None,
+    max_chars: int = 120_000,
+) -> str:
+    """
+    Assemble the per-submission half of the grading prompt.
+
+    The rubric goes first and verbatim, because it is the thing the model
+    must not drift from. The submission follows, rendered cell by cell so
+    the model can cite "cell 4" back to the student.
+    """
+    parts: list[str] = []
+
+    parts.append(f"# Assignment\n{assignment_name}")
+    if assignment_description:
+        parts.append(f"\n{assignment_description.strip()}")
+
+    parts.append("\n\n# Rubric\n")
+    parts.append(json.dumps(
+        {
+            "total_points": rubric.get("total_points"),
+            "grading_notes": rubric.get("grading_notes"),
+            "criteria": rubric.get("criteria", []),
+        },
+        indent=2,
+        ensure_ascii=False,
+    ))
+
+    if expected_solution:
+        parts.append(
+            "\n\n# Instructor reference solution\n"
+            "Use this as the expected result. The student's approach may "
+            "differ; only a different *result* is a deduction.\n\n"
+        )
+        parts.append(_render_cells(expected_solution, limit=30_000))
+
+    parts.append("\n\n# Student submission\n")
+    meta = parsed.get("metadata", {}) or {}
+    stats = parsed.get("stats", {}) or {}
+    parts.append(
+        f"File type: {parsed.get('file_type')}\n"
+        f"Code cells: {stats.get('n_code_cells', 0)}, "
+        f"markdown cells: {stats.get('n_markdown_cells', 0)}, "
+        f"recorded outputs: {stats.get('n_outputs', 0)}, "
+        f"figures: {stats.get('n_images', 0)}\n"
+        f"Notebook was executed: {meta.get('executed', 'unknown')}\n\n"
+    )
+    parts.append(_render_cells(parsed, limit=max_chars))
+
+    if parsed.get("errors"):
+        parts.append("\n\n## Recorded errors in this submission\n")
+        for err in parsed["errors"][:10]:
+            parts.append(f"```\n{err[:2000]}\n```\n")
+
+    parts.append(
+        "\n\n# Your task\n"
+        "Grade this submission against every criterion in the rubric above. "
+        "Return one entry in `criteria_results` per rubric criterion, using "
+        "the exact `criterion_id` values given. Then write `summary_feedback`: "
+        "2-4 sentences to the student covering what they did well and the "
+        "single most important thing to improve."
+    )
+    return "".join(parts)
+
+
+def _render_cells(parsed: dict[str, Any], limit: int) -> str:
+    """
+    Render cells as a readable transcript, truncating from the middle if
+    the submission is enormous. We keep the head and the tail because
+    that is where the setup and the conclusions live.
+    """
+    blocks: list[str] = []
+    for cell in parsed.get("cells", []):
+        idx = cell.get("index")
+        kind = cell.get("cell_type")
+        source = (cell.get("source") or "").rstrip()
+        if not source:
+            continue
+
+        if kind == "code":
+            ec = cell.get("execution_count")
+            header = f"## Cell {idx} - code (execution_count={ec})"
+            body = f"```python\n{source}\n```"
+            outputs = cell.get("outputs") or []
+            if outputs:
+                joined = "\n".join(o[:2000] for o in outputs)
+                body += f"\n\nOutput:\n```\n{joined}\n```"
+            else:
+                body += "\n\nOutput: (none recorded)"
+        else:
+            header = f"## Cell {idx} - {kind}"
+            body = source
+
+        blocks.append(f"{header}\n{body}\n")
+
+    text = "\n".join(blocks)
+    if len(text) <= limit:
+        return text
+
+    head = text[: limit // 2]
+    tail = text[-(limit // 2):]
+    omitted = len(text) - limit
+    return (
+        f"{head}\n\n"
+        f"[... {omitted:,} characters omitted from the middle of this "
+        f"submission because it exceeded the size limit ...]\n\n"
+        f"{tail}"
+    )
+
+
+# ---------------------------------------------------------------------
+# Rubric extraction
+# ---------------------------------------------------------------------
+RUBRIC_EXTRACTION_SYSTEM = """\
+You convert a professor's assignment description into a structured \
+grading rubric.
+
+Rules:
+- Derive criteria from what the assignment actually asks students to do. \
+One criterion per distinct deliverable or skill being assessed.
+- If the assignment states point values, use them exactly. If it does not, \
+distribute points sensibly across the criteria and make them sum to the \
+requested total.
+- Prefer 3-8 criteria. Fewer than 3 is too coarse to give useful feedback; \
+more than 8 makes grading noisy.
+- Set `requires_output` to true only for criteria that can only be verified \
+by looking at a cell's execution output.
+- `keywords` are optional literal identifiers (function names, library \
+calls) a correct solution is likely to contain.
+
+Respond with a single JSON object and nothing else."""
+
+RUBRIC_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "total_points": {"type": "number"},
+        "criteria": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "max_points": {"type": "number"},
+                    "keywords": {"type": "array", "items": {"type": "string"}},
+                    "requires_output": {"type": "boolean"},
+                },
+                "required": [
+                    "id", "name", "description",
+                    "max_points", "keywords", "requires_output",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "grading_notes": {"type": "string"},
+    },
+    "required": ["title", "total_points", "criteria", "grading_notes"],
+    "additionalProperties": False,
+}
+
+
+def build_rubric_extraction_prompt(text: str, total_points: float | None) -> str:
+    target = (
+        f"The criteria must sum to exactly {total_points} points."
+        if total_points
+        else "Choose a sensible total (100 unless the text implies otherwise)."
+    )
+    return (
+        f"# Assignment description\n\n{text.strip()}\n\n"
+        f"# Your task\n\nExtract a grading rubric from the above. {target}"
+    )
+
+
+# ---------------------------------------------------------------------
+# Image / figure evaluation
+# ---------------------------------------------------------------------
+IMAGE_EVAL_SYSTEM = """\
+You evaluate plots and figures produced by a student's code.
+
+Describe what the figure actually shows, then judge it against the \
+criterion you are given. Comment on whether axes are labelled, whether the \
+chart type suits the data, and whether the visible result is consistent \
+with what the code claims to compute.
+
+If the image is blank, corrupt, or clearly a placeholder, say so plainly.
+
+Respond with a single JSON object and nothing else."""
+
+IMAGE_EVAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "description": {"type": "string"},
+        "meets_criterion": {"type": "boolean"},
+        "issues": {"type": "array", "items": {"type": "string"}},
+        "feedback": {"type": "string"},
+    },
+    "required": ["description", "meets_criterion", "issues", "feedback"],
+    "additionalProperties": False,
+}

@@ -1,0 +1,34 @@
+# AutoGrade CS - FastAPI backend
+FROM python:3.11-slim
+
+# lxml and psycopg2 need a compiler; drop the toolchain afterwards so it
+# does not ship in the final image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libxml2-dev libxslt1-dev libpq-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && apt-get purge -y build-essential && apt-get autoremove -y
+
+COPY backend/ ./backend/
+COPY alembic/ ./alembic/
+COPY alembic.ini .
+
+# Student uploads live here. Mount a volume over it in production -
+# grades are in the database, but the source files are not.
+RUN mkdir -p /app/uploads
+
+# Never run as root.
+RUN useradd --create-home --uid 1000 autograde \
+    && chown -R autograde:autograde /app
+USER autograde
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://localhost:8000/api/health || exit 1
+
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

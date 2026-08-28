@@ -16,6 +16,13 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+# SQLite runs in WAL mode (see backend/database.py), which writes these
+# sidecar files. They hold real committed data - never commit them.
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
 
 # Uploads - student files stay local
 uploads/
