@@ -10,8 +10,9 @@ reproducing a bug against a known dataset.
     python scripts/seed_demo_data.py --grade        # real grading (needs a key)
 
 Seeding and the similarity scan work with no API key. Only --grade needs a
-real ANTHROPIC_API_KEY in .env; --fake-grades writes obviously-placeholder
-results so the review and export screens have something to show.
+configured LLM provider in .env (LLM_PROVIDER + its key/URL); --fake-grades
+writes obviously-placeholder results so the review and export screens have
+something to show.
 """
 from __future__ import annotations
 

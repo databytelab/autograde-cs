@@ -33,12 +33,12 @@ async def lifespan(_app: FastAPI):
     """Startup checks. Surfaces a missing API key before a professor
     uploads 200 notebooks and only then discovers grading is offline."""
     upload_root()
-    key = settings.anthropic_api_key
     logger.info(
-        "AutoGrade CS started (env=%s, db=%s, anthropic_key=%s)",
+        "AutoGrade CS started (env=%s, db=%s, llm_provider=%s, grading=%s)",
         settings.environment,
         settings.database_url.split("://", 1)[0],
-        "set" if key and not key.startswith("your_") else "MISSING",
+        settings.active_provider(),
+        "ready" if settings.grading_configured() else "NOT CONFIGURED",
     )
     yield
 
@@ -145,9 +145,10 @@ async def health() -> dict:
     """
     Liveness plus a readiness summary.
 
-    `anthropic_configured` being false means everything works except
-    grading - which is worth surfacing before a professor uploads 200
-    notebooks.
+    `llm_configured` being false means everything works except grading -
+    which is worth surfacing before a professor uploads 200 notebooks.
+    `llm_provider` says which backend (openai / anthropic / local) will run.
+    `anthropic_configured` is kept for backward compatibility.
     """
     from backend.services.canvas_service import is_configured as canvas_configured
 
@@ -156,6 +157,8 @@ async def health() -> dict:
         "status": "ok",
         "version": "1.0.0",
         "environment": settings.environment,
+        "llm_provider": settings.active_provider(),
+        "llm_configured": settings.grading_configured(),
         "anthropic_configured": bool(key and not key.startswith("your_")),
         "canvas_configured": canvas_configured(),
     }

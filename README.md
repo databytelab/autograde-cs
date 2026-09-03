@@ -1,8 +1,10 @@
 # AutoGrade CS
 
 AI-assisted grading for CS assignments. Upload a class's `.ipynb`,
-`.html`, or `.py` submissions, grade them against your rubric with Claude,
-review and adjust every result, then export to CSV, Excel, PDF, or Canvas.
+`.html`, or `.py` submissions, grade them against your rubric with the AI
+of your choice — **OpenAI by default, or Anthropic Claude, or a local model
+(e.g. Qwen)** — review and adjust every result, then export to CSV, Excel,
+PDF, or Canvas.
 
 **You approve every grade.** Nothing reaches a student or a gradebook
 until a professor finalizes it.
@@ -31,7 +33,8 @@ until a professor finalizes it.
 
 - **Backend** — FastAPI, SQLAlchemy, Alembic (Python 3.11)
 - **Frontend** — Streamlit
-- **AI** — Anthropic Claude (`claude-opus-5`)
+- **AI** — pluggable: OpenAI (default), Anthropic Claude, or any local
+  OpenAI-compatible server (vLLM, Ollama, LM Studio). Set `LLM_PROVIDER`.
 - **Database** — SQLite for development, PostgreSQL for production
 
 ---
@@ -50,12 +53,17 @@ cp .env.example .env           # then edit it — see below
 alembic upgrade head
 ```
 
-Two things must go in `.env` before grading works:
+Two things must go in `.env` before grading works. By default the grader
+uses OpenAI:
 
 ```ini
-ANTHROPIC_API_KEY=sk-ant-...
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
 SECRET_KEY=<python -c "import secrets; print(secrets.token_hex(32))">
 ```
+
+To use Claude or a local model instead, see
+[Switching the AI provider](#switching-the-ai-provider) below.
 
 Run the backend and the frontend in separate terminals:
 
@@ -99,9 +107,11 @@ volume details.
 1. **Parse** — every submission becomes one common structure regardless of
    format, so the grader never has to care whether it started as a
    notebook or a `.py` file.
-2. **Grade** — the rubric goes to Claude verbatim, followed by the
+2. **Grade** — the rubric goes to the model verbatim, followed by the
    submission rendered cell by cell with its recorded outputs, plus up to
-   four figures. Structured outputs guarantee a parseable response.
+   four figures. Structured outputs guarantee a parseable response. The
+   model is whichever `LLM_PROVIDER` selects; the rest of the pipeline
+   does not change.
 3. **Verify** — this is the part that matters. `normalize_grade` recomputes
    the total, clamps every score to its criterion maximum, inserts any
    criterion the model omitted with a `grader_error` flag, and adds
@@ -126,20 +136,70 @@ See [`docs/canvas_setup.md`](docs/canvas_setup.md).
 
 ---
 
+## Switching the AI provider
+
+Grading works with three interchangeable backends. Set `LLM_PROVIDER` in
+`.env` and restart the server — nothing else changes.
+
+**OpenAI (default)**
+
+```ini
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_GRADING_MODEL=gpt-4o        # needs vision + strict JSON
+```
+
+**Anthropic Claude**
+
+```ini
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_GRADING_MODEL=claude-opus-5
+```
+
+**Local model (Qwen via Ollama / vLLM / LM Studio)**
+
+No API key, no data leaving your machine. Start a local server that speaks
+the OpenAI API, then:
+
+```ini
+LLM_PROVIDER=local
+LOCAL_BASE_URL=http://localhost:11434/v1   # Ollama shown; vLLM :8000, LM Studio :1234
+LOCAL_MODEL=qwen2.5-coder:7b               # use a vision model (e.g. qwen2.5-vl) to grade figures
+```
+
+With Ollama that is just `ollama serve` and `ollama pull qwen2.5-coder`.
+A text-only local model still grades code; to grade plots, use a
+vision-capable model or pass `--no-images` to the smoke test.
+
+### Verify it works (smoke test)
+
+Grade one real submission end to end with whatever provider is active:
+
+```bash
+python scripts/smoke_test.py \
+  --student Lab2_Tasks_student_submission.html \
+  --solution Lab2_DT_Solution.html
+```
+
+It prints the provider, the model, a full scorecard, and the token usage —
+the quickest way to confirm a new provider or key is wired up correctly.
+
 ## Testing
 
 ```bash
 pytest
 ```
 
-234 tests, no network access, no API key required — the Anthropic client
-is replaced with a scripted fake.
+249 tests, no network access, no API key required — the LLM client is
+replaced with a scripted fake for every provider.
 
 | File | Covers |
 |------|--------|
 | `test_parsers.py` | the shared parse contract across all three formats, plus corrupt/empty/unrun inputs |
 | `test_rubric_engine.py` | validation, normalisation, letter-grade boundaries |
-| `test_grader.py` | the trust boundary — clamping, missing criteria, bad JSON, every API failure path |
+| `test_grader.py` | the trust boundary — clamping, missing criteria, bad JSON, every API failure path (Anthropic) |
+| `test_providers.py` | the provider switch — factory selection, the OpenAI/local request shape, parsing, usage, and error translation |
 | `test_similarity.py` | rename-invariance, false-positive resistance, winnowing properties |
 | `test_api.py` | every endpoint: status codes, auth, ownership isolation, validation |
 | `test_full_pipeline.py` | the whole workflow end to end, plus cascade deletes and mid-batch failures |
@@ -150,6 +210,7 @@ is replaced with a scripted fake.
 ```
 backend/
   ai/            grader.py, prompts.py, image_evaluator.py
+    providers/   the LLM switch: openai / anthropic / local, one interface
   parsers/       notebook / html / python, behind parser_router.py
   services/      rubric, grading orchestration, export, Canvas
   routers/       FastAPI endpoints
@@ -167,7 +228,12 @@ docs/            rubric format, API reference, Canvas setup
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `ANTHROPIC_API_KEY` | — | Required for grading. Everything else works without it. |
+| `LLM_PROVIDER` | `openai` | Which AI grades: `openai`, `anthropic`, or `local`. |
+| `OPENAI_API_KEY` | — | Required when provider is `openai`. |
+| `OPENAI_GRADING_MODEL` | `gpt-4o` | Any model your account can call (needs vision + JSON). |
+| `ANTHROPIC_API_KEY` | — | Required when provider is `anthropic`. |
+| `LOCAL_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible URL when provider is `local`. |
+| `LOCAL_MODEL` | `qwen2.5-coder:7b` | The local model to grade with. |
 | `SECRET_KEY` | — | **Change it.** Signs JWTs. |
 | `DATABASE_URL` | `sqlite:///./autograde.db` | Use PostgreSQL in production. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `480` | 8 hours. |

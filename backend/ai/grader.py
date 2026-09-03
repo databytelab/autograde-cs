@@ -1,62 +1,64 @@
 """
-The AI grader - the one place that talks to Claude about grading.
+The AI grader — the one place that turns a submission into a grade.
 
-Design rules that the rest of the app depends on:
+Design rules that the rest of the app depends on, unchanged no matter which
+model does the grading (OpenAI, Anthropic, or a local Qwen):
 
-1. **The model never does arithmetic that matters.** Claude assigns a
-   score per criterion; Python sums them, computes the percentage, and
-   picks the letter grade. A model slip cannot corrupt a total.
+1. **The model never does arithmetic that matters.** The model assigns a
+   score per criterion; Python sums them, computes the percentage, and picks
+   the letter grade. A model slip cannot corrupt a total.
 
-2. **Every rubric criterion always comes back.** If the model omits one,
-   we insert it with a score of 0 and a `grader_error` flag rather than
-   silently shrinking the rubric.
+2. **Every rubric criterion always comes back.** If the model omits one, we
+   insert it with a score of 0 and a `grader_error` flag rather than silently
+   shrinking the rubric.
 
-3. **Scores are clamped to [0, max_points].** The model cannot award 120
-   out of 20 no matter what it returns.
+3. **Scores are clamped to [0, max_points].** The model cannot award 120 out
+   of 20 no matter what it returns.
 
-4. **The raw model output is preserved verbatim** in `ai_raw_output` for
-   the audit trail, before any of the above normalisation.
+4. **The raw model output is preserved verbatim** in `ai_raw_output` for the
+   audit trail, before any of the above normalisation.
 
-The client is created lazily, so importing this module never requires an
-API key - the parsers, the rubric engine and most of the test-suite
-depend on that.
+Which model answers is chosen by `settings.llm_provider` and lives behind
+`backend.ai.providers`. This module owns the grading *logic*; the provider
+owns the *call*.
+
+The Anthropic client is created lazily below (and the test-suite patches it
+here), so importing this module never requires an API key — the parsers, the
+rubric engine, and most of the test-suite depend on that.
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any
 
 import anthropic
 
 from backend.ai import prompts
+from backend.ai.providers import get_provider
+# Re-exported so existing imports (`from backend.ai.grader import GradingError`,
+# `_extract_json`) keep working now that these live in the provider layer.
+from backend.ai.providers.base import GradingError, extract_json as _extract_json
 from backend.config import settings
 from backend.services.rubric_service import letter_grade
 
 logger = logging.getLogger(__name__)
 
-# Grading is the quality-critical path: use the strongest model.
-GRADING_MODEL = "claude-opus-5"
-# Rubric extraction is a smaller, more mechanical job but still benefits
-# from careful reading of the professor's prose.
-RUBRIC_MODEL = "claude-opus-5"
 
-MAX_TOKENS = 16_000
-
+# ---------------------------------------------------------------------
+# Anthropic client management
+# ---------------------------------------------------------------------
+# Kept here (rather than inside the Anthropic provider) so the test-suite,
+# which patches `grader.get_client`, keeps working unchanged. The Anthropic
+# provider pulls its client from here.
 _client: anthropic.Anthropic | None = None
-
-
-class GradingError(RuntimeError):
-    """Raised when the AI grader cannot produce a usable result."""
 
 
 def get_client() -> anthropic.Anthropic:
     """
     Return the shared Anthropic client, creating it on first use.
 
-    Tests monkeypatch this function (or `backend.ai.grader._client`) to
-    avoid any network access.
+    Tests monkeypatch this function (or `backend.ai.grader._client`) to avoid
+    any network access.
     """
     global _client
     if _client is None:
@@ -73,124 +75,6 @@ def reset_client() -> None:
     """Drop the cached client - used by tests and after a config change."""
     global _client
     _client = None
-
-
-# ---------------------------------------------------------------------
-# Low-level call
-# ---------------------------------------------------------------------
-_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.M)
-
-
-def _extract_json(text: str) -> dict[str, Any]:
-    """
-    Parse the model's response into a dict.
-
-    Structured outputs make the response pure JSON, but we stay tolerant
-    of a stray markdown fence or a leading sentence so that a transient
-    formatting slip does not fail a whole batch.
-    """
-    candidate = _FENCE.sub("", text).strip()
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
-
-    # Fall back to the outermost {...} span.
-    start, end = candidate.find("{"), candidate.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(candidate[start : end + 1])
-        except json.JSONDecodeError as exc:
-            raise GradingError(
-                f"Model returned text that is not valid JSON: {exc}"
-            ) from exc
-    raise GradingError("Model returned no JSON object at all")
-
-
-def _call_claude(
-    *,
-    system: str,
-    user_prompt: str,
-    schema: dict[str, Any],
-    model: str,
-    images: list[dict[str, str]] | None = None,
-    effort: str = "high",
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """
-    One structured-output call to Claude.
-
-    Returns (parsed_json, usage_info). Raises GradingError on refusal,
-    truncation, or unparseable output.
-    """
-    content: list[dict[str, Any]] = []
-    for image in images or []:
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": image["media_type"],
-                "data": image["data_b64"],
-            },
-        })
-    content.append({"type": "text", "text": user_prompt})
-
-    client = get_client()
-    try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=MAX_TOKENS,
-            system=[{
-                "type": "text",
-                "text": system,
-                # The system prompt is byte-identical for every submission
-                # in a batch, so caching it turns the second and later
-                # calls into a cache read.
-                "cache_control": {"type": "ephemeral"},
-            }],
-            messages=[{"role": "user", "content": content}],
-            thinking={"type": "adaptive"},
-            output_config={
-                "effort": effort,
-                "format": {"type": "json_schema", "schema": schema},
-            },
-        )
-    except anthropic.AuthenticationError as exc:
-        raise GradingError("Anthropic rejected the API key in your .env file.") from exc
-    except anthropic.RateLimitError as exc:
-        raise GradingError(
-            "Anthropic rate limit reached. Wait a moment and grade again."
-        ) from exc
-    except anthropic.APIStatusError as exc:
-        raise GradingError(f"Anthropic API error {exc.status_code}: {exc.message}") from exc
-    except anthropic.APIConnectionError as exc:
-        raise GradingError("Could not reach the Anthropic API - check your network.") from exc
-
-    if response.stop_reason == "refusal":
-        detail = getattr(response, "stop_details", None)
-        category = getattr(detail, "category", None) if detail else None
-        raise GradingError(
-            f"Claude declined to grade this submission (category: {category})."
-        )
-    if response.stop_reason == "max_tokens":
-        raise GradingError(
-            "The grading response was cut off before it finished. "
-            "The submission is probably too large to grade in one pass."
-        )
-
-    text = "".join(b.text for b in response.content if b.type == "text")
-    if not text.strip():
-        raise GradingError("Claude returned an empty response.")
-
-    usage = {
-        "input_tokens": response.usage.input_tokens,
-        "output_tokens": response.usage.output_tokens,
-        "cache_read_input_tokens": getattr(response.usage, "cache_read_input_tokens", 0),
-        "cache_creation_input_tokens": getattr(
-            response.usage, "cache_creation_input_tokens", 0
-        ),
-        "model": response.model,
-    }
-    return _extract_json(text), usage
 
 
 # ---------------------------------------------------------------------
@@ -333,12 +217,13 @@ def grade_submission(
         # Figures are expensive; send only the first few.
         images = (parsed.get("images") or [])[:max_images]
 
-    ai_output, usage = _call_claude(
+    ai_output, usage = get_provider().complete_json(
         system=prompts.GRADING_SYSTEM,
         user_prompt=user_prompt,
         schema=prompts.GRADING_RESPONSE_SCHEMA,
-        model=GRADING_MODEL,
         images=images,
+        effort="high",
+        purpose="grading",
     )
 
     result = normalize_grade(ai_output, rubric)
@@ -361,16 +246,16 @@ def extract_rubric_from_text(
     total_points: float | None = None,
 ) -> dict[str, Any]:
     """
-    Ask Claude to turn a prose assignment description into rubric JSON.
+    Ask the model to turn a prose assignment description into rubric JSON.
 
-    Returns the RAW extracted dict - the caller is expected to run it
-    through `rubric_service.validate_rubric`.
+    Returns the RAW extracted dict - the caller is expected to run it through
+    `rubric_service.validate_rubric`.
     """
-    ai_output, _usage = _call_claude(
+    ai_output, _usage = get_provider().complete_json(
         system=prompts.RUBRIC_EXTRACTION_SYSTEM,
         user_prompt=prompts.build_rubric_extraction_prompt(text, total_points),
         schema=prompts.RUBRIC_RESPONSE_SCHEMA,
-        model=RUBRIC_MODEL,
         effort="medium",
+        purpose="rubric",
     )
     return ai_output

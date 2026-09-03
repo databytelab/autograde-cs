@@ -13,6 +13,34 @@ import streamlit as st
 
 from frontend_streamlit.components import api_client
 
+# The .env variable a professor must set for each provider, shown in the
+# "grading disabled" message so the fix is obvious.
+_KEY_HINT = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "local": "a running local model server (see LOCAL_BASE_URL)",
+}
+
+
+def grading_ready(status: dict[str, Any] | None) -> bool:
+    """
+    Whether the backend can actually grade right now.
+
+    Prefers the provider-agnostic `llm_configured`, falling back to the older
+    `anthropic_configured` so a backend that predates the provider switch
+    still reports correctly.
+    """
+    if not status:
+        return False
+    return bool(status.get("llm_configured", status.get("anthropic_configured", False)))
+
+
+def grading_key_hint(status: dict[str, Any] | None) -> str:
+    """The provider name and the env var to set, e.g. 'OPENAI_API_KEY'."""
+    provider = (status or {}).get("llm_provider", "anthropic")
+    return _KEY_HINT.get(provider, "ANTHROPIC_API_KEY")
+
+
 # Matches the letter grades from backend/services/rubric_service.py
 GRADE_COLORS = {
     "A+": "#1B7F3B", "A": "#1B7F3B", "A-": "#2E9E52",
@@ -105,8 +133,8 @@ def render_sidebar(user: dict[str, Any]) -> None:
         status = api_client.health()
         if status is None:
             st.error("Backend offline")
-        elif not status.get("anthropic_configured"):
-            st.warning("No Anthropic API key - grading is disabled")
+        elif not grading_ready(status):
+            st.warning(f"Grading disabled - set {grading_key_hint(status)}")
         else:
             st.success("Backend ready")
 

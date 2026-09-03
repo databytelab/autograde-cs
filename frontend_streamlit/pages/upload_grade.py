@@ -16,6 +16,7 @@ from frontend_streamlit.components.ui import (
     assignment_selector,
     course_selector,
     flag_chips,
+    grading_ready,
     page_setup,
     require_auth,
 )
@@ -35,7 +36,7 @@ if assignment is None:
     st.stop()
 
 health = api_client.health() or {}
-grading_available = health.get("anthropic_configured", False)
+grading_available = grading_ready(health)
 
 st.divider()
 

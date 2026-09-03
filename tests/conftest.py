@@ -38,7 +38,12 @@ def _test_settings(tmp_path_factory: pytest.TempPathFactory) -> None:
     settings.upload_dir = str(tmp_path_factory.mktemp("uploads"))
     settings.secret_key = "test-secret-key-not-used-anywhere-real"
     settings.environment = "test"
+    # The existing suite exercises the Anthropic path (its request shape and
+    # error translation), and `mock_claude` patches that client. Provider
+    # tests live in test_providers.py and switch this per-test.
+    settings.llm_provider = "anthropic"
     settings.anthropic_api_key = ""     # forces the mock path
+    settings.openai_api_key = ""
     settings.canvas_base_url = ""
     settings.canvas_api_token = ""
 

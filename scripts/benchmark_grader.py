@@ -22,7 +22,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.ai.grader import GRADING_MODEL, GradingError, grade_submission  # noqa: E402
+from backend.ai.grader import GradingError, grade_submission  # noqa: E402
+from backend.ai.providers import get_provider  # noqa: E402
+from backend.config import settings  # noqa: E402
 from backend.parsers import ParseError, parse_submission  # noqa: E402
 from backend.services.rubric_service import validate_rubric  # noqa: E402
 
@@ -98,7 +100,10 @@ def main() -> None:
           f"{stats['n_images']} figure(s)")
     print(f"Rubric    {len(BENCHMARK_RUBRIC['criteria'])} criteria, "
           f"{BENCHMARK_RUBRIC['total_points']:g} points")
-    print(f"Model     {GRADING_MODEL}")
+    provider = get_provider()
+    model = provider._model_for("grading")  # noqa: SLF001 - script introspection
+    print(f"Provider  {provider.name}")
+    print(f"Model     {model}")
     print()
 
     if args.dry_run:

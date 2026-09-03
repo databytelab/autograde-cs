@@ -19,7 +19,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from frontend_streamlit.components import api_client
-from frontend_streamlit.components.ui import page_link, page_setup, render_sidebar
+from frontend_streamlit.components.ui import (
+    grading_key_hint,
+    grading_ready,
+    page_link,
+    page_setup,
+    render_sidebar,
+)
 
 page_setup("Home")
 
@@ -37,10 +43,12 @@ if st.session_state.get("token"):
     st.success(f"Signed in as **{user['name']}**")
 
     status = api_client.health()
-    if status and not status.get("anthropic_configured"):
+    if status and not grading_ready(status):
+        key_hint = grading_key_hint(status)
+        provider = status.get("llm_provider", "the AI")
         st.warning(
-            "**Grading is disabled.** No Anthropic API key is configured on the "
-            "backend. Add `ANTHROPIC_API_KEY=...` to your `.env` file and "
+            f"**Grading is disabled.** The {provider} backend is not configured. "
+            f"Set `{key_hint}` in your `.env` file (or switch `LLM_PROVIDER`) and "
             "restart the server. Everything else - uploading, similarity "
             "detection, export - works without it."
         )

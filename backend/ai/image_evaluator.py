@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.ai import prompts
-from backend.ai.grader import GradingError, _call_claude
+from backend.ai.providers import GradingError, get_provider
 
 # Vision calls are the most expensive thing this app does. Cap them.
 MAX_IMAGES_PER_CALL = 4
@@ -62,13 +62,13 @@ def evaluate_figures(
         f"the criterion."
     )
 
-    result, _usage = _call_claude(
+    result, _usage = get_provider().complete_json(
         system=prompts.IMAGE_EVAL_SYSTEM,
         user_prompt=user_prompt,
         schema=prompts.IMAGE_EVAL_SCHEMA,
-        model="claude-opus-5",
         images=batch,
         effort="medium",
+        purpose="grading",
     )
 
     return {
