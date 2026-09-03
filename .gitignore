@@ -27,6 +27,10 @@ env/
 # Uploads - student files stay local
 uploads/
 
+# Local real sample data (student work / instructor solutions) - never publish
+Lab2_DT_Solution.html
+Lab2_Tasks_student_submission.html
+
 # Logs
 *.log
 logs/
