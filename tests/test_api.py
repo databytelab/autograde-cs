@@ -359,6 +359,52 @@ def test_upload_submissions(client, professor, assignment):
     assert body["results"][0]["student_name"] == "Good Submission"
 
 
+def test_upload_a_zip_creates_a_submission_per_file(client, professor, assignment):
+    """A .zip (e.g. Canvas download) becomes one submission per file inside."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("alice_chen_hw3.py",
+                         (SAMPLES / "good_submission.py").read_bytes())
+        archive.writestr("submissions/bob_smith_hw3.html",
+                         (SAMPLES / "good_submission.html").read_bytes())
+        archive.writestr("notes.txt", b"ignore me - unsupported")
+        archive.writestr("__MACOSX/._junk.py", b"x = 1")   # junk, skipped
+
+    response = client.post(
+        f"/api/assignments/{assignment['id']}/submissions",
+        files=[("files", ("submissions.zip", buf.getvalue(), "application/zip"))],
+        headers=professor["headers"],
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["uploaded"] == 2
+    ok_names = {r["filename"] for r in body["results"] if r["ok"]}
+    assert ok_names == {"alice_chen_hw3.py", "bob_smith_hw3.html"}
+
+
+def test_upload_a_zip_with_no_gradeable_files_is_reported(client, professor, assignment):
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("readme.txt", b"nothing gradeable here")
+
+    response = client.post(
+        f"/api/assignments/{assignment['id']}/submissions",
+        files=[("files", ("empty.zip", buf.getvalue(), "application/zip"))],
+        headers=professor["headers"],
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["uploaded"] == 0
+    assert body["failed"] == 1
+    assert "no .ipynb" in body["results"][0]["error"]
+
+
 def test_upload_rejects_unsupported_types_without_failing_the_batch(
     client, professor, assignment
 ):
@@ -366,7 +412,7 @@ def test_upload_rejects_unsupported_types_without_failing_the_batch(
         ("files", ("good.ipynb", (SAMPLES / "good_submission.ipynb").read_bytes(),
                    "application/json")),
         ("files", ("notes.txt", b"just some text", "text/plain")),
-        ("files", ("archive.zip", b"PK\x03\x04", "application/zip")),
+        ("files", ("image.png", b"\x89PNG\r\n", "image/png")),
     ]
     response = client.post(
         f"/api/assignments/{assignment['id']}/submissions",

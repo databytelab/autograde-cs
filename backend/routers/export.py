@@ -156,6 +156,32 @@ def sync_roster(
     }
 
 
+def _canvas_comment(grade) -> str:
+    """
+    Compose the feedback comment posted to a student in Canvas: the overall
+    summary plus a per-criterion breakdown (with any professor override
+    applied). Canvas truncates very long comments; push_grades_bulk caps it.
+    """
+    parts: list[str] = []
+    if grade.summary_feedback:
+        parts.append(grade.summary_feedback.strip())
+
+    overrides = grade.professor_overrides or {}
+    lines: list[str] = []
+    for criterion in grade.criteria_results or []:
+        cid = criterion.get("criterion_id")
+        score = overrides.get(cid, {}).get("new_score", criterion.get("score"))
+        line = (f"- {criterion.get('name')}: "
+                f"{float(score or 0):g}/{float(criterion.get('max_score', 0)):g}")
+        feedback = (criterion.get("feedback") or "").strip()
+        if feedback:
+            line += f" - {feedback}"
+        lines.append(line)
+    if lines:
+        parts.append("Per-criterion:\n" + "\n".join(lines))
+    return "\n\n".join(parts)
+
+
 @router.post("/assignments/{assignment_id}/canvas/push-grades", tags=["canvas"])
 def push_grades(
     assignment: Assignment = Depends(get_owned_assignment),
@@ -205,10 +231,13 @@ def push_grades(
                             "reason": "no Canvas user id - run sync-roster first"})
             continue
 
+        # Push the PERCENTAGE (e.g. "96%"), not the raw rubric score. Canvas
+        # scales a percentage to whatever the assignment is worth there, so a
+        # 100-point rubric maps correctly onto a 3-point Canvas assignment.
         payload.append({
             "canvas_user_id": submission.student_id_external,
-            "score": float(grade.effective_score),
-            "comment": grade.summary_feedback or "",
+            "score": f"{round(float(grade.percentage or 0), 2)}%",
+            "comment": _canvas_comment(grade),
         })
 
     if not payload:

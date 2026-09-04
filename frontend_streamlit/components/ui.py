@@ -132,6 +132,18 @@ def _workflow_links() -> None:
         page_link(target, label, icon)
 
 
+def _backend_status_line() -> None:
+    """Shared sidebar footer: is the API reachable, is grading configured?"""
+    status = api_client.health()
+    if status is None:
+        st.error("Backend offline - start the API server")
+    elif not grading_ready(status):
+        st.warning(f"Grading off - set {grading_key_hint(status)}")
+    else:
+        provider = status.get("llm_provider", "AI")
+        st.success(f"Grading ready · {provider}")
+
+
 def render_sidebar(user: dict[str, Any]) -> None:
     """Identity, workflow links, and backend status."""
     with st.sidebar:
@@ -143,19 +155,36 @@ def render_sidebar(user: dict[str, Any]) -> None:
         _workflow_links()
 
         st.divider()
-        # Backend status: is the API reachable, and is grading configured?
-        status = api_client.health()
-        if status is None:
-            st.error("Backend offline - start the API server")
-        elif not grading_ready(status):
-            st.warning(f"Grading off - set {grading_key_hint(status)}")
-        else:
-            provider = status.get("llm_provider", "AI")
-            st.success(f"Grading ready · {provider}")
+        _backend_status_line()
 
         if st.button("Sign out", use_container_width=True):
             api_client.logout()
             st.rerun()
+
+
+def render_locked_sidebar() -> None:
+    """
+    The sidebar a signed-out visitor sees.
+
+    Streamlit hides its own file-name navigation (see .streamlit/config.toml),
+    so a newcomer would otherwise see nothing at all and have no idea what the
+    tool contains. We show the whole workflow, but locked - the steps are
+    visible and greyed out, which both advertises what's inside and makes clear
+    that signing in is the way in.
+    """
+    with st.sidebar:
+        st.markdown("**AutoGrade CS**")
+        st.info("Sign in to unlock the workflow.", icon=":material/lock:")
+
+        st.markdown("**Workflow**")
+        for target, label, icon in WORKFLOW[1:]:  # skip Home - it's this page
+            try:
+                st.page_link(target, label=label, icon=icon, disabled=True)
+            except Exception:  # noqa: BLE001 - older Streamlit or a direct run
+                st.caption(label)
+
+        st.divider()
+        _backend_status_line()
 
 
 # ---------------------------------------------------------------------

@@ -47,10 +47,12 @@ st.subheader("1 · Upload submissions")
 
 uploaded = st.file_uploader(
     "Student files",
-    type=["ipynb", "html", "htm", "py"],
+    type=["ipynb", "html", "htm", "py", "zip"],
     accept_multiple_files=True,
-    help="Drop a whole folder of downloads at once. Names are guessed from "
-         "the filename and can be corrected below.",
+    help="Drop individual files, or a .zip (e.g. Canvas 'Download "
+         "Submissions') - a zip is unpacked into one submission per file "
+         "inside. Student names are guessed from the filename and can be "
+         "corrected below.",
 )
 
 if uploaded and st.button(f"Upload {len(uploaded)} file(s)", type="primary"):

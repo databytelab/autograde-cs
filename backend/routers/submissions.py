@@ -1,7 +1,11 @@
 """Submission upload, grading kick-off, and similarity scanning."""
 from __future__ import annotations
 
+import io
+import zipfile
 from datetime import datetime
+from pathlib import Path
+from typing import BinaryIO, Iterator
 
 from fastapi import (
     APIRouter,
@@ -14,6 +18,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from backend.config import settings
 from backend.database import get_db
 from backend.models.assignment import Assignment
 from backend.models.similarity_flag import SimilarityFlag
@@ -46,6 +51,99 @@ from backend.utils.file_utils import (
 
 router = APIRouter(prefix="/api", tags=["submissions"])
 
+_SUBMISSION_EXTS = {".ipynb", ".html", ".htm", ".py"}
+
+
+def _persist_one(
+    db: Session, assignment: Assignment, stream: BinaryIO, filename: str,
+) -> tuple[bool, UploadResult]:
+    """Save one submission file and create its row. Returns (ok, result)."""
+    try:
+        path, size, file_type = save_upload(stream, filename, assignment.id)
+    except (UnsupportedFileError, FileTooLargeError) as exc:
+        return False, UploadResult(filename=filename, ok=False, error=str(exc))
+    except OSError as exc:
+        return False, UploadResult(
+            filename=filename, ok=False, error=f"Could not save file: {exc}"
+        )
+
+    # Identity from the filename first (fast, no parse); fall back to reading
+    # the student's name/id out of the file when the filename says nothing.
+    student_name = guess_student_name(filename)
+    student_id = None
+    if not student_name:
+        try:
+            student_name, student_id = extract_identity_from_parsed(
+                parse_submission(path)
+            )
+        except Exception:  # noqa: BLE001 - identity detection never fails an upload
+            pass
+
+    submission = Submission(
+        assignment_id=assignment.id,
+        student_name=student_name,
+        student_id_external=student_id,
+        original_filename=filename,
+        file_path=str(path),
+        file_type=file_type,
+        file_size_bytes=size,
+        status="pending",
+    )
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+    return True, UploadResult(
+        filename=filename, ok=True,
+        submission_id=submission.id, student_name=student_name,
+    )
+
+
+def _zip_members(data: bytes) -> Iterator[tuple[str, bytes]]:
+    """Yield (basename, bytes) for each gradeable file in a zip archive."""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for info in archive.infolist():
+            if info.is_dir() or "__MACOSX" in info.filename:
+                continue
+            base = info.filename.replace("\\", "/").split("/")[-1]
+            if not base or base.startswith("."):
+                continue
+            if Path(base).suffix.lower() not in _SUBMISSION_EXTS:
+                continue
+            yield base, archive.read(info)
+
+
+def _persist_zip(
+    db: Session, assignment: Assignment, stream: BinaryIO, filename: str,
+) -> list[tuple[bool, UploadResult]]:
+    """
+    Extract a zip (e.g. a Canvas "Download Submissions" bundle) and save one
+    submission per gradeable file inside it. Nested folders are flattened; junk
+    like __MACOSX and dotfiles is skipped.
+    """
+    max_bytes = settings.max_file_size_mb * 1024 * 1024 * 5
+    data = stream.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        return [(False, UploadResult(
+            filename=filename, ok=False,
+            error=f"Zip exceeds the {settings.max_file_size_mb * 5} MB limit.",
+        ))]
+    try:
+        members = list(_zip_members(data))
+    except zipfile.BadZipFile:
+        return [(False, UploadResult(
+            filename=filename, ok=False,
+            error=f"{filename} is not a valid zip file.",
+        ))]
+
+    if not members:
+        return [(False, UploadResult(
+            filename=filename, ok=False,
+            error=f"{filename} contained no .ipynb, .html, or .py files.",
+        ))]
+
+    return [_persist_one(db, assignment, io.BytesIO(mbytes), mname)
+            for mname, mbytes in members]
+
 
 # ---------------------------------------------------------------------
 # Upload
@@ -77,52 +175,18 @@ def upload_submissions(
 
     for upload in files:
         filename = upload.filename or "unnamed"
-        try:
-            path, size, file_type = save_upload(upload.file, filename, assignment.id)
-        except (UnsupportedFileError, FileTooLargeError) as exc:
-            failed += 1
-            results.append(UploadResult(filename=filename, ok=False, error=str(exc)))
-            continue
-        except OSError as exc:
-            failed += 1
-            results.append(UploadResult(
-                filename=filename, ok=False, error=f"Could not save file: {exc}"
-            ))
-            continue
 
-        # Identity comes from the filename first (fast, no parse). When the
-        # filename tells us nothing, read the student's name/id from inside
-        # the file. Either source can leave it blank - the professor can
-        # correct it in the UI.
-        student_name = guess_student_name(filename)
-        student_id = None
-        if not student_name:
-            try:
-                student_name, student_id = extract_identity_from_parsed(
-                    parse_submission(path)
-                )
-            except Exception:  # noqa: BLE001 - identity detection never fails an upload
-                pass
+        # A .zip (e.g. Canvas "Download Submissions") becomes one submission
+        # per gradeable file inside it; anything else is one submission.
+        if filename.lower().endswith(".zip"):
+            outcomes = _persist_zip(db, assignment, upload.file, filename)
+        else:
+            outcomes = [_persist_one(db, assignment, upload.file, filename)]
 
-        submission = Submission(
-            assignment_id=assignment.id,
-            student_name=student_name,
-            student_id_external=student_id,
-            original_filename=filename,
-            file_path=str(path),
-            file_type=file_type,
-            file_size_bytes=size,
-            status="pending",
-        )
-        db.add(submission)
-        db.commit()
-        db.refresh(submission)
-
-        uploaded += 1
-        results.append(UploadResult(
-            filename=filename, ok=True,
-            submission_id=submission.id, student_name=student_name,
-        ))
+        for ok, result in outcomes:
+            uploaded += int(ok)
+            failed += int(not ok)
+            results.append(result)
 
     return UploadResponse(
         assignment_id=assignment.id,
