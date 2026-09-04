@@ -132,16 +132,25 @@ def _workflow_links() -> None:
         page_link(target, label, icon)
 
 
+# How each provider is named to a professor, who cares which service their
+# students' work is sent to - not which key happens to be set.
+_PROVIDER_LABEL = {
+    "openai": "the OpenAI API",
+    "anthropic": "the Claude API",
+    "local": "a local model",
+}
+
+
 def _backend_status_line() -> None:
     """Shared sidebar footer: is the API reachable, is grading configured?"""
     status = api_client.health()
     if status is None:
         st.error("Backend offline - start the API server")
     elif not grading_ready(status):
-        st.warning(f"Grading off - set {grading_key_hint(status)}")
+        st.warning(f"Grading unavailable - set {grading_key_hint(status)}")
     else:
-        provider = status.get("llm_provider", "AI")
-        st.success(f"Grading ready · {provider}")
+        provider = status.get("llm_provider", "")
+        st.success(f"Ready to grade - using {_PROVIDER_LABEL.get(provider, provider)}")
 
 
 def render_sidebar(user: dict[str, Any]) -> None:
@@ -160,31 +169,6 @@ def render_sidebar(user: dict[str, Any]) -> None:
         if st.button("Sign out", use_container_width=True):
             api_client.logout()
             st.rerun()
-
-
-def render_locked_sidebar() -> None:
-    """
-    The sidebar a signed-out visitor sees.
-
-    Streamlit hides its own file-name navigation (see .streamlit/config.toml),
-    so a newcomer would otherwise see nothing at all and have no idea what the
-    tool contains. We show the whole workflow, but locked - the steps are
-    visible and greyed out, which both advertises what's inside and makes clear
-    that signing in is the way in.
-    """
-    with st.sidebar:
-        st.markdown("**AutoGrade CS**")
-        st.info("Sign in to unlock the workflow.", icon=":material/lock:")
-
-        st.markdown("**Workflow**")
-        for target, label, icon in WORKFLOW[1:]:  # skip Home - it's this page
-            try:
-                st.page_link(target, label=label, icon=icon, disabled=True)
-            except Exception:  # noqa: BLE001 - older Streamlit or a direct run
-                st.caption(label)
-
-        st.divider()
-        _backend_status_line()
 
 
 # ---------------------------------------------------------------------

@@ -64,11 +64,31 @@ FORMATS = [
                                  "importer expects."),
 ]
 
+# The four blurbs are not the same length, so left to themselves the columns
+# put their buttons at four different heights (Excel wraps to three lines and
+# drops below the rest). Reserving three lines for every blurb lines the
+# buttons up without padding the copy out with filler.
+st.markdown(
+    """
+    <style>
+    .ag-fmt__title{font-size:1.45rem; font-weight:700; line-height:1.3;
+      margin:0 0 .45rem}
+    .ag-fmt__blurb{font-size:.95rem; line-height:1.55; color:#6B655B;
+      margin:0 0 .75rem; min-height:4.65em}
+    @media (max-width:640px){ .ag-fmt__blurb{min-height:0} }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 columns = st.columns(len(FORMATS))
 for column, (fmt, label, blurb) in zip(columns, FORMATS):
     with column:
-        st.markdown(f"### {label}")
-        st.caption(blurb)
+        st.markdown(
+            f'<div class="ag-fmt__title">{label}</div>'
+            f'<div class="ag-fmt__blurb">{blurb}</div>',
+            unsafe_allow_html=True,
+        )
         if st.button(f"Build {label}", key=f"build_{fmt}",
                      use_container_width=True):
             with st.spinner(f"Building the {label} file..."):

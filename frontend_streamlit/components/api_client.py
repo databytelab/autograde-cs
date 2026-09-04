@@ -19,7 +19,14 @@ from typing import Any
 import requests
 import streamlit as st
 
-API_BASE = os.environ.get("AUTOGRADE_API_BASE", "http://localhost:8000")
+# 127.0.0.1, not "localhost", and deliberately so: on Windows "localhost"
+# resolves to ::1 first, and the IPv6 connection stalls for ~200ms before
+# falling back to IPv4. Measured on this machine: localhost connects in
+# ~210ms, 127.0.0.1 in ~1ms. Every call the frontend makes paid that, and
+# a page that fires several of them felt slow whenever the pooled
+# connection had gone idle. Override with AUTOGRADE_API_BASE if the API
+# lives somewhere else.
+API_BASE = os.environ.get("AUTOGRADE_API_BASE", "http://127.0.0.1:8000")
 
 # Grading a full class is slow by design - one model call per submission.
 GRADING_TIMEOUT = 1800  # 30 minutes
