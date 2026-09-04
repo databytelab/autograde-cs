@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     max_file_size_mb: int = 50
 
+    # Blanket cap on any request body, enforced by middleware. Larger than
+    # max_file_size_mb so a legitimate multi-file upload still fits, and
+    # matched by the reverse proxy's own limit.
+    max_request_body_mb: int = 300
+
+    # Origins allowed to call the API from a browser. Comma-separated.
+    # The Streamlit frontend calls the API server-side, so this matters only
+    # for direct browser access (Swagger, a future JS client).
+    cors_origins: str = "http://localhost:8501,http://localhost:3000"
+
     # ── App ───────────────────────────────────────────────────
     environment: str = "development"
     app_name: str = "AutoGrade CS"
@@ -84,9 +94,17 @@ class Settings(BaseSettings):
     # with it means every issued JWT can be forged by anyone with the source.
     DEFAULT_SECRET_KEY: ClassVar[str] = "change-this-in-production"
     MIN_SECRET_KEY_LENGTH: ClassVar[int] = 32
+    DEFAULT_DATABASE_URL: ClassVar[str] = "sqlite:///./autograde.db"
+    # Placeholder values .env.example ships. Any of them means "not filled in".
+    PLACEHOLDER_MARKERS: ClassVar[tuple[str, ...]] = (
+        "your_", "change_me", "change-me", "generate_a_random", "placeholder",
+    )
 
     def is_production(self) -> bool:
         return self.environment.strip().lower() in ("production", "prod", "staging")
+
+    def is_testing(self) -> bool:
+        return self.environment.strip().lower() in ("test", "testing")
 
     def assert_production_ready(self) -> list[str]:
         """
@@ -105,6 +123,7 @@ class Settings(BaseSettings):
             return []
 
         problems: list[str] = []
+
         if self.secret_key == self.DEFAULT_SECRET_KEY:
             problems.append(
                 "SECRET_KEY is still the built-in default, so anyone with the "
@@ -116,6 +135,40 @@ class Settings(BaseSettings):
                 f"SECRET_KEY is shorter than {self.MIN_SECRET_KEY_LENGTH} "
                 "characters and is too easy to brute-force."
             )
+        elif self._is_placeholder(self.secret_key):
+            problems.append(
+                "SECRET_KEY still holds the placeholder from .env.example."
+            )
+
+        # SQLite is fine for development and for the test-suite, but a
+        # production deployment runs an API and a worker as separate
+        # processes against the same database. SQLite serialises writers and
+        # `FOR UPDATE SKIP LOCKED` does not exist there, so job claiming
+        # degrades to a lock-step queue - and on ephemeral container storage
+        # the whole gradebook disappears on redeploy.
+        if self.database_url == self.DEFAULT_DATABASE_URL:
+            problems.append(
+                "DATABASE_URL is still the development default "
+                f"({self.DEFAULT_DATABASE_URL}). Set a PostgreSQL URL."
+            )
+        elif self.database_url.startswith("sqlite"):
+            problems.append(
+                "DATABASE_URL points at SQLite. Production runs the API and "
+                "the grading worker as separate processes; use PostgreSQL so "
+                "job claiming is transactional and the data survives a "
+                "redeploy."
+            )
+        elif self._is_placeholder(self.database_url):
+            problems.append("DATABASE_URL still holds a placeholder value.")
+
+        # The provider that will actually be used must be configured, and
+        # not with the example placeholder.
+        if not self.grading_configured():
+            problems.append(
+                f"The '{self.active_provider()}' provider has no usable "
+                "credentials, so grading would fail for every submission."
+            )
+
         if problems:
             raise ValueError(
                 f"Refusing to start in environment '{self.environment}':\n  - "
@@ -123,14 +176,20 @@ class Settings(BaseSettings):
             )
 
         warnings: list[str] = []
-        if self.database_url.startswith("sqlite"):
+        if not self.canvas_base_url:
             warnings.append(
-                "DATABASE_URL points at SQLite. That is workable for a single "
-                "instance on a persistent disk, but it serialises writes and "
-                "is lost on ephemeral container storage. Use PostgreSQL once "
-                "more than one worker or machine is involved."
+                "Canvas is not configured; grades can still be exported as "
+                "CSV/Excel/PDF but cannot be pushed to the gradebook."
             )
         return warnings
+
+    def cors_origin_list(self) -> list[str]:
+        """CORS origins as a list, ignoring blanks and stray whitespace."""
+        return [o.strip() for o in (self.cors_origins or "").split(",") if o.strip()]
+
+    def _is_placeholder(self, value: str) -> bool:
+        lowered = (value or "").lower()
+        return any(marker in lowered for marker in self.PLACEHOLDER_MARKERS)
 
     def active_provider(self) -> str:
         """The provider name, normalised to lowercase."""

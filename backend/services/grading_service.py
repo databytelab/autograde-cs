@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import logging
 import statistics
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -34,15 +34,14 @@ from backend.utils.similarity import build_fingerprint, find_similar_pairs
 
 logger = logging.getLogger(__name__)
 
-# How long an assignment may sit in `grading` before another run assumes the
-# previous one died and takes over. Long enough for a real batch (a few
-# hundred submissions at ~20s each), short enough to self-heal after a crash
-# without an administrator having to touch the database.
-GRADING_LOCK_TIMEOUT = timedelta(hours=3)
-
 
 class GradingInProgressError(RuntimeError):
-    """Raised when an assignment is already being graded."""
+    """
+    Raised when an assignment already has a queued or running job.
+
+    Lives here rather than in job_service so callers can catch it without
+    importing the queue, but it is the queue that enforces it.
+    """
 
 
 # ---------------------------------------------------------------------
@@ -191,31 +190,24 @@ def grade_assignment(
     submission_ids: list[str] | None = None,
     regrade: bool = False,
     include_images: bool = True,
+    on_progress: Callable[[dict[str, int]], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """
     Grade every eligible submission in an assignment.
 
-    Returns a summary dict matching schemas.submission.GradeResponse.
-    """
-    # Refuse to run two batches over the same assignment at once. Without
-    # this, a double-click or a second browser tab grades every submission
-    # twice: double the model spend, and both runs race to create the same
-    # GradeResult row (submission_id is unique), so one of them fails and
-    # marks perfectly good submissions as errored. The lock self-heals - a
-    # run that died leaves the status behind, so an old timestamp is treated
-    # as abandoned rather than blocking the assignment forever.
-    if assignment.status == AssignmentStatus.GRADING:
-        started = assignment.updated_at or datetime.utcnow()
-        if datetime.utcnow() - started < GRADING_LOCK_TIMEOUT:
-            raise GradingInProgressError(
-                "This assignment is already being graded. Wait for that run to "
-                "finish before starting another."
-            )
-        logger.warning(
-            "Assignment %s has been in 'grading' since %s; assuming the "
-            "previous run died and taking over.", assignment.id, started,
-        )
+    Returns a summary dict matching schemas.submission.GradeResponse, plus
+    a `cancelled` flag.
 
+    `on_progress` is called after each submission with the running counters,
+    and `should_cancel` is consulted between submissions. Both are optional
+    and exist for the job worker; grading behaviour is identical with or
+    without them. Cancellation is checked *between* submissions rather than
+    during one, so a submission is never left half-graded.
+
+    Duplicate runs are prevented by the job queue (a partial unique index on
+    grading_jobs), not here - one lock, in one place.
+    """
     rubric = resolve_rubric(assignment)
 
     # The loop below reads `grade_result` on every row to decide whether to
@@ -234,8 +226,24 @@ def grade_assignment(
 
     results: list[dict[str, Any]] = []
     graded = failed = skipped = 0
+    cancelled = False
+
+    def _report() -> None:
+        if on_progress is not None:
+            on_progress({
+                "processed": graded + failed + skipped,
+                "graded": graded, "failed": failed, "skipped": skipped,
+            })
 
     for submission in submissions:
+        # Between submissions, never inside one: a half-written grade would
+        # be worse than finishing the one already in flight.
+        if should_cancel is not None and should_cancel():
+            cancelled = True
+            logger.info("Grading of assignment %s cancelled after %d of %d",
+                        assignment.id, graded + failed + skipped, len(submissions))
+            break
+
         if submission.grade_result is not None and not regrade:
             skipped += 1
             results.append({
@@ -248,6 +256,7 @@ def grade_assignment(
                 "flags": submission.grade_result.flags or [],
                 "error": None,
             })
+            _report()
             continue
 
         try:
@@ -264,6 +273,7 @@ def grade_assignment(
                 "error": str(exc),
                 "flags": [],
             })
+            _report()
             continue
         except Exception as exc:  # noqa: BLE001 - one bad row must not kill the batch
             failed += 1
@@ -279,6 +289,7 @@ def grade_assignment(
                 "error": f"Unexpected error: {exc}",
                 "flags": [],
             })
+            _report()
             continue
 
         graded += 1
@@ -292,6 +303,7 @@ def grade_assignment(
             "flags": grade.flags or [],
             "error": None,
         })
+        _report()
 
     remaining = db.query(Submission).filter(
         Submission.assignment_id == assignment.id,
@@ -308,6 +320,7 @@ def grade_assignment(
         "failed": failed,
         "skipped": skipped,
         "results": results,
+        "cancelled": cancelled,
     }
 
 

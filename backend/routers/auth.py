@@ -1,7 +1,7 @@
 """Registration, login, and the current-user endpoint."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,11 @@ from backend.config import settings
 from backend.database import get_db
 from backend.models.user import User
 from backend.schemas.user import Token, UserCreate, UserLogin, UserOut
+from backend.services.throttle_service import (
+    TooManyAttemptsError,
+    check_login_allowed,
+    record_attempt,
+)
 from backend.utils.auth_utils import (
     PasswordTooLongError,
     create_access_token,
@@ -16,6 +21,7 @@ from backend.utils.auth_utils import (
     hash_password,
     verify_password,
 )
+from backend.utils.logging_utils import hash_identifier, log_event
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -64,8 +70,24 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> Token:
     return _issue_token(user)
 
 
+def _client_ip(request: Request) -> str | None:
+    """
+    The caller's address, honouring the reverse proxy.
+
+    Only the first hop of X-Forwarded-For is used, and only because this
+    service is deployed behind a proxy that sets it. Do not expose the API
+    directly to the internet, or the header becomes attacker-controlled and
+    the per-address limit becomes trivially evadable.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:64]
+    return request.client.host[:64] if request.client else None
+
+
 @router.post("/login", response_model=Token)
 def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> Token:
@@ -74,33 +96,53 @@ def login(
 
     Uses the OAuth2 password form so the Swagger "Authorize" button works;
     the `username` field carries the email address.
+
+    Rate-limited per account and per client address - see throttle_service.
     """
-    user = db.query(User).filter(User.email == form.username.lower().strip()).first()
+    email = form.username.lower().strip()
+    ip_address = _client_ip(request)
+
+    try:
+        check_login_allowed(db, email, ip_address)
+    except TooManyAttemptsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
+    user = db.query(User).filter(User.email == email).first()
 
     # Same message and same code path for both failures - a different
     # response for "no such user" would let anyone enumerate accounts.
     if user is None or not verify_password(form.password, user.password_hash):
+        record_attempt(db, email, ip_address, successful=False)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if not user.is_active:
+        # Not counted as a failed password: the credentials were right.
+        log_event("auth.login_deactivated", level="warning",
+                  email_hash=hash_identifier(email), ip=ip_address)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account has been deactivated",
         )
 
+    record_attempt(db, email, ip_address, successful=True)
     return _issue_token(user)
 
 
 @router.post("/login-json", response_model=Token)
-def login_json(payload: UserLogin, db: Session = Depends(get_db)) -> Token:
+def login_json(request: Request, payload: UserLogin,
+               db: Session = Depends(get_db)) -> Token:
     """JSON-body login, for clients that would rather not post a form."""
     form = OAuth2PasswordRequestForm(
         username=payload.email, password=payload.password, scope=""
     )
-    return login(form=form, db=db)
+    return login(request=request, form=form, db=db)
 
 
 @router.get("/me", response_model=UserOut)

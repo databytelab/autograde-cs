@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import SAMPLES, SIMPLE_RUBRIC, grading_payload, upload_sample
+from tests.conftest import (
+    SAMPLES, SIMPLE_RUBRIC, grade_now, grading_payload, upload_sample,
+)
 
 
 # ---------------------------------------------------------------------
@@ -491,15 +493,13 @@ def test_submissions_are_isolated_between_users(client, professor, assignment, t
 # ---------------------------------------------------------------------
 # Grading
 # ---------------------------------------------------------------------
-def test_grade_endpoint(client, professor, assignment, mock_claude):
+def test_grade_endpoint(client, professor, assignment, mock_claude, db_session):
     mock_claude()
     upload_sample(client, assignment["id"], professor["headers"],
                   "good_submission.ipynb", "good_submission.py")
 
-    response = client.post(f"/api/assignments/{assignment['id']}/grade",
-                           json={}, headers=professor["headers"])
-    assert response.status_code == 200
-    body = response.json()
+    response = grade_now(client, db_session, assignment["id"], professor["headers"])
+    body = response
     assert body["graded"] == 2
     assert body["failed"] == 0
     assert all(r["ok"] and r["total_score"] == 89.0 for r in body["results"])
@@ -507,29 +507,26 @@ def test_grade_endpoint(client, professor, assignment, mock_claude):
 
 def test_grade_skips_already_graded_unless_regrading(
     client, professor, assignment, mock_claude
-):
+, db_session):
     fake = mock_claude()
     upload_sample(client, assignment["id"], professor["headers"],
                   "good_submission.ipynb")
 
-    client.post(f"/api/assignments/{assignment['id']}/grade", json={},
-                headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"])
     assert len(fake.calls) == 1
 
-    again = client.post(f"/api/assignments/{assignment['id']}/grade", json={},
-                        headers=professor["headers"])
-    assert again.json()["skipped"] == 1
+    again = grade_now(client, db_session, assignment["id"], professor["headers"])
+    assert again["skipped"] == 1
     assert len(fake.calls) == 1, "no second API call without regrade=true"
 
-    regrade = client.post(f"/api/assignments/{assignment['id']}/grade",
-                          json={"regrade": True}, headers=professor["headers"])
-    assert regrade.json()["graded"] == 1
+    regrade = grade_now(client, db_session, assignment["id"], professor["headers"], regrade=True)
+    assert regrade["graded"] == 1
     assert len(fake.calls) == 2
 
 
 def test_one_bad_submission_does_not_stop_the_batch(
     client, professor, assignment, mock_claude
-):
+, db_session):
     """The whole point of the per-submission error policy."""
     mock_claude()
     files = [
@@ -541,38 +538,34 @@ def test_one_bad_submission_does_not_stop_the_batch(
     client.post(f"/api/assignments/{assignment['id']}/submissions",
                 files=files, headers=professor["headers"])
 
-    response = client.post(f"/api/assignments/{assignment['id']}/grade",
-                           json={}, headers=professor["headers"])
-    body = response.json()
+    response = grade_now(client, db_session, assignment["id"], professor["headers"])
+    body = response
     assert body["graded"] == 1
     assert body["failed"] == 1
     failure = next(r for r in body["results"] if not r["ok"])
     assert "not valid JSON" in failure["error"]
 
 
-def test_grade_a_subset_by_id(client, professor, assignment, mock_claude):
+def test_grade_a_subset_by_id(client, professor, assignment, mock_claude, db_session):
     mock_claude()
     upload = upload_sample(client, assignment["id"], professor["headers"],
                            "good_submission.ipynb", "good_submission.py")
     first = upload.json()["results"][0]["submission_id"]
 
-    response = client.post(f"/api/assignments/{assignment['id']}/grade",
-                           json={"submission_ids": [first]},
-                           headers=professor["headers"])
-    assert response.json()["graded"] == 1
+    response = grade_now(client, db_session, assignment["id"], professor["headers"], submission_ids=[first])
+    assert response["graded"] == 1
 
 
 # ---------------------------------------------------------------------
 # Results, overrides, finalizing
 # ---------------------------------------------------------------------
 @pytest.fixture
-def graded(client, professor, assignment, mock_claude):
+def graded(client, db_session, professor, assignment, mock_claude):
     """An assignment with one graded submission."""
     mock_claude()
     upload = upload_sample(client, assignment["id"], professor["headers"],
                            "good_submission.ipynb")
-    client.post(f"/api/assignments/{assignment['id']}/grade", json={},
-                headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"])
     submission_id = upload.json()["results"][0]["submission_id"]
     result = client.get(f"/api/submissions/{submission_id}/result",
                         headers=professor["headers"]).json()

@@ -288,12 +288,43 @@ def delete_submission(submission_id: str):
 
 def grade(assignment_id: str, *, submission_ids: list[str] | None = None,
           regrade: bool = False, include_images: bool = True):
+    """
+    Queue a grading run. Returns the job, not the grades.
+
+    This returns in milliseconds now: the work happens in the worker and the
+    caller polls `get_job`. The old behaviour held this request open for the
+    whole batch, so a refresh or a proxy timeout lost the run.
+    """
     return api_call(
         "POST", f"/api/assignments/{assignment_id}/grade",
-        timeout=GRADING_TIMEOUT,
         json={"submission_ids": submission_ids, "regrade": regrade,
               "include_images": include_images},
     )
+
+
+def get_job(job_id: str, *, quiet: bool = False):
+    """
+    One job's live status.
+
+    Deliberately not cached: this is polled every couple of seconds and a
+    six-second-old progress number would make the bar appear to stall.
+    """
+    return api_call("GET", f"/api/jobs/{job_id}", quiet=quiet)
+
+
+def latest_job(assignment_id: str, *, quiet: bool = True):
+    """
+    The most recent job for an assignment.
+
+    How the page recovers after a refresh: the browser forgets the job id,
+    the assignment does not.
+    """
+    return api_call("GET", f"/api/assignments/{assignment_id}/jobs/latest",
+                    quiet=quiet)
+
+
+def cancel_job(job_id: str):
+    return api_call("POST", f"/api/jobs/{job_id}/cancel")
 
 
 # ---------------------------------------------------------------------

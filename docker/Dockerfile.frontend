@@ -10,6 +10,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY frontend_streamlit/ ./frontend_streamlit/
+# The warm theme and the custom navigation live here. Without it the
+# container renders Streamlit's defaults, which is a different product.
+COPY .streamlit/ ./.streamlit/
 
 RUN useradd --create-home --uid 1000 autograde \
     && chown -R autograde:autograde /app

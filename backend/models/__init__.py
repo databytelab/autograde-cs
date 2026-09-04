@@ -9,6 +9,10 @@ from backend.models.assignment      import Assignment
 from backend.models.submission      import Submission
 from backend.models.grade_result    import GradeResult
 from backend.models.similarity_flag import SimilarityFlag
+from backend.models.grading_job     import (
+    ACTIVE_STATUSES, TERMINAL_STATUSES, GradingJob, JobStatus,
+)
+from backend.models.login_attempt   import LoginAttempt
 
 __all__ = [
     "User", "UserRole",
@@ -17,4 +21,6 @@ __all__ = [
     "Submission",
     "GradeResult",
     "SimilarityFlag",
+    "GradingJob", "JobStatus", "ACTIVE_STATUSES", "TERMINAL_STATUSES",
+    "LoginAttempt",
 ]

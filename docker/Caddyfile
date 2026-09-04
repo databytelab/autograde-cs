@@ -1,0 +1,53 @@
+# AutoGrade CS reverse proxy.
+#
+# Caddy terminates TLS and is the only service with a published port.
+# Certificates are automatic: a real hostname gets one from Let's Encrypt,
+# and `localhost` gets a locally-trusted one, so the same file works for a
+# trial run and for production.
+
+{
+	email {$ACME_EMAIL}
+	# Do not advertise the server software in responses.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$PUBLIC_HOSTNAME} {
+	encode gzip
+
+	# Sent on every response. The API sets these too - this is the copy that
+	# applies to the Streamlit UI, which is the part a browser renders.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "no-referrer"
+		# Streamlit needs inline script/style and a websocket back to itself.
+		Content-Security-Policy   "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' wss: https:; frame-ancestors 'none'"
+		-Server
+	}
+
+	# Cap uploads at the same number the API enforces, so an over-sized body
+	# is rejected at the edge instead of travelling through the stack first.
+	request_body {
+		max_size {$MAX_REQUEST_BODY_MB}MB
+	}
+
+	# The API is not published directly; it is reachable only through here,
+	# which is what makes the X-Forwarded-For the login throttle reads
+	# trustworthy.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else is the Streamlit UI, including its websocket.
+	handle {
+		reverse_proxy frontend:8501
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

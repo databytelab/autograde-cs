@@ -26,7 +26,11 @@ from backend.models.similarity_flag import SimilarityFlag
 from backend.models.submission import Submission
 from backend.models.user import User
 from backend.parsers import parse_submission
-from backend.routers.deps import get_owned_assignment, get_owned_submission
+from backend.routers.deps import (
+    get_owned_assignment,
+    get_owned_job,
+    get_owned_submission,
+)
 from backend.schemas.submission import (
     GradeRequest,
     GradeResponse,
@@ -39,11 +43,10 @@ from backend.schemas.submission import (
     UploadResponse,
     UploadResult,
 )
-from backend.services.grading_service import (
-    GradingInProgressError,
-    grade_assignment,
-    scan_similarity,
-)
+from backend.models.grading_job import GradingJob
+from backend.schemas.grading_job import GradingJobDetail, GradingJobOut
+from backend.services.grading_service import GradingInProgressError, scan_similarity
+from backend.services.job_service import cancel_job, enqueue_grading_job
 from backend.utils.auth_utils import get_current_user
 from backend.utils.file_utils import (
     FileTooLargeError,
@@ -307,24 +310,33 @@ def delete_submission(
 # ---------------------------------------------------------------------
 # Grading
 # ---------------------------------------------------------------------
-@router.post("/assignments/{assignment_id}/grade", response_model=GradeResponse)
+@router.post(
+    "/assignments/{assignment_id}/grade",
+    response_model=GradingJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def grade(
     payload: GradeRequest | None = None,
     assignment: Assignment = Depends(get_owned_assignment),
     db: Session = Depends(get_db),
-) -> GradeResponse:
+    current_user: User = Depends(get_current_user),
+) -> GradingJobOut:
     """
-    Grade submissions.
+    Queue a grading run and return immediately.
 
-    Runs synchronously - a batch of 30 notebooks takes a few minutes, and
-    a professor watching a progress bar is a better experience than a job
-    id they have to poll. Individual failures are reported per submission
-    rather than failing the request.
+    This used to grade inline, which meant a request held open for the
+    length of the batch - over an hour for a large class. A proxy timeout,
+    a browser refresh or a restart lost the run and the model spend with
+    it. Now the work is a row in `grading_jobs`: a worker picks it up, the
+    caller polls `GET /api/jobs/{id}`, and the run survives all three.
+
+    202, not 200: the grading has been accepted, not performed. A second
+    request while one is still queued or running gets 409.
     """
     payload = payload or GradeRequest()
     try:
-        summary = grade_assignment(
-            db, assignment,
+        job = enqueue_grading_job(
+            db, assignment, current_user,
             submission_ids=payload.submission_ids,
             regrade=payload.regrade,
             include_images=payload.include_images,
@@ -334,7 +346,53 @@ def grade(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
-    return GradeResponse(**summary)
+    return GradingJobOut.model_validate(job)
+
+
+@router.get("/jobs/{job_id}", response_model=GradingJobDetail, tags=["jobs"])
+def get_job(job: GradingJob = Depends(get_owned_job)) -> GradingJobDetail:
+    """
+    One job's status. This is the endpoint the UI polls, so it stays cheap:
+    a single indexed row, no joins, no submission scan.
+    """
+    return GradingJobDetail.model_validate(job)
+
+
+@router.get(
+    "/assignments/{assignment_id}/jobs/latest",
+    response_model=GradingJobDetail | None,
+    tags=["jobs"],
+)
+def latest_job(
+    assignment: Assignment = Depends(get_owned_assignment),
+    db: Session = Depends(get_db),
+) -> GradingJobDetail | None:
+    """
+    The most recent job for an assignment, if any.
+
+    This is what lets the UI recover after a refresh: the browser has
+    forgotten the job id, but the assignment has not forgotten the job.
+    """
+    job = (
+        db.query(GradingJob)
+        .filter(GradingJob.assignment_id == assignment.id)
+        .order_by(GradingJob.created_at.desc())
+        .first()
+    )
+    return GradingJobDetail.model_validate(job) if job else None
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=GradingJobOut, tags=["jobs"])
+def cancel(
+    job: GradingJob = Depends(get_owned_job),
+    db: Session = Depends(get_db),
+) -> GradingJobOut:
+    """
+    Stop a run. A queued job stops at once; a running one stops after the
+    submission currently being graded, so nothing is left half-written.
+    Grades already written stay written.
+    """
+    return GradingJobOut.model_validate(cancel_job(db, job))
 
 
 # ---------------------------------------------------------------------

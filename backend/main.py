@@ -21,11 +21,9 @@ from backend.parsers.base import ParseError
 from backend.routers import assignments, auth, courses, export, results, submissions
 from backend.services.rubric_service import RubricError
 from backend.utils.file_utils import FileTooLargeError, UnsupportedFileError, upload_root
+from backend.utils.logging_utils import configure_logging, log_event
 
-logging.basicConfig(
-    level=logging.INFO if settings.environment == "development" else logging.WARNING,
-    format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
@@ -36,12 +34,12 @@ async def lifespan(_app: FastAPI):
     for warning in settings.assert_production_ready():
         logger.warning("Deployment warning: %s", warning)
     upload_root()
-    logger.info(
-        "AutoGrade CS started (env=%s, db=%s, llm_provider=%s, grading=%s)",
-        settings.environment,
-        settings.database_url.split("://", 1)[0],
-        settings.active_provider(),
-        "ready" if settings.grading_configured() else "NOT CONFIGURED",
+    log_event(
+        "app.started",
+        env=settings.environment,
+        database=settings.database_url.split("://", 1)[0],
+        provider=settings.active_provider(),
+        grading="ready" if settings.grading_configured() else "not_configured",
     )
     yield
 
@@ -60,11 +58,60 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8501"],
+    allow_origins=settings.cors_origin_list(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Defence-in-depth headers. The reverse proxy sets these too; setting them
+# here as well means they are still present if the API is ever reached
+# directly (a port-forward while debugging, say) and it keeps the policy
+# next to the app it describes rather than only in deployment config.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    # This is a JSON API - it should never be a source of active content.
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if settings.is_production():
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    """
+    Reject an over-sized request before it is read.
+
+    The upload path already streams with a per-file cap, but that only
+    protects the upload route. This is the blanket limit that stops a large
+    body reaching any endpoint - the proxy enforces the same number, this is
+    the backstop if the API is reached directly.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit():
+        if int(declared) > settings.max_request_body_mb * 1024 * 1024:
+            log_event("http.body_too_large", level="warning",
+                      path=request.url.path, bytes=int(declared))
+            return JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content={"detail":
+                         f"Request body exceeds the "
+                         f"{settings.max_request_body_mb} MB limit."},
+            )
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------

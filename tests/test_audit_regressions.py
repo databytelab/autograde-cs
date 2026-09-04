@@ -13,13 +13,14 @@ import zipfile
 
 import pytest
 
-from tests.conftest import grading_payload, upload_sample
+from tests.conftest import grade_now, grading_payload, upload_sample
 
 
 # ---------------------------------------------------------------------
 # H1 - a regrade must not silently reapply the previous overrides
 # ---------------------------------------------------------------------
-def test_regrade_clears_professor_overrides(client, professor, assignment, mock_claude):
+def test_regrade_clears_professor_overrides(client, db_session, professor,
+                                            assignment, mock_claude):
     """
     Before the fix, `grade_one` replaced `criteria_results` but left
     `professor_overrides` in place. The stale override was then reapplied
@@ -30,12 +31,9 @@ def test_regrade_clears_professor_overrides(client, professor, assignment, mock_
     mock_claude([grading_payload()])
     upload_sample(client, assignment["id"], professor["headers"], "good_submission.html")
 
-    graded = client.post(
-        f"/api/assignments/{assignment['id']}/grade",
-        json={"regrade": False, "include_images": False},
-        headers=professor["headers"],
-    )
-    assert graded.status_code == 200, graded.text
+    graded = grade_now(client, db_session, assignment["id"], professor["headers"],
+                       regrade=False, include_images=False)
+    assert graded["status"] == "completed", graded
 
     results = client.get(
         f"/api/assignments/{assignment['id']}/results", headers=professor["headers"]
@@ -52,12 +50,9 @@ def test_regrade_clears_professor_overrides(client, professor, assignment, mock_
     assert overridden.json()["professor_overrides"]
 
     # Re-grade the whole assignment.
-    regraded = client.post(
-        f"/api/assignments/{assignment['id']}/grade",
-        json={"regrade": True, "include_images": False},
-        headers=professor["headers"],
-    )
-    assert regraded.status_code == 200, regraded.text
+    regraded = grade_now(client, db_session, assignment["id"], professor["headers"],
+                         regrade=True, include_images=False)
+    assert regraded["status"] == "completed", regraded
 
     after = client.get(
         f"/api/assignments/{assignment['id']}/results", headers=professor["headers"]
@@ -71,14 +66,13 @@ def test_regrade_clears_professor_overrides(client, professor, assignment, mock_
     assert after["effective_score"] == pytest.approx(after["total_score"])
 
 
-def test_regrade_clears_approval(client, professor, assignment, mock_claude):
+def test_regrade_clears_approval(client, db_session, professor, assignment,
+                                 mock_claude):
     """An approved grade must not stay approved after being regraded."""
     mock_claude([grading_payload()])
     upload_sample(client, assignment["id"], professor["headers"], "good_submission.html")
-    client.post(
-        f"/api/assignments/{assignment['id']}/grade",
-        json={"include_images": False}, headers=professor["headers"],
-    )
+    grade_now(client, db_session, assignment["id"], professor["headers"],
+              include_images=False)
     results = client.get(
         f"/api/assignments/{assignment['id']}/results", headers=professor["headers"]
     ).json()
@@ -86,10 +80,8 @@ def test_regrade_clears_approval(client, professor, assignment, mock_claude):
 
     client.post(f"/api/results/{grade_id}/finalize", json={"finalized": True},
                 headers=professor["headers"])
-    client.post(
-        f"/api/assignments/{assignment['id']}/grade",
-        json={"regrade": True, "include_images": False}, headers=professor["headers"],
-    )
+    grade_now(client, db_session, assignment["id"], professor["headers"],
+              regrade=True, include_images=False)
     after = client.get(
         f"/api/assignments/{assignment['id']}/results", headers=professor["headers"]
     ).json()[0]
@@ -214,33 +206,55 @@ def test_default_secret_key_is_rejected_outside_development():
         unsafe.assert_production_ready()
 
 
-def test_production_settings_with_a_real_key_pass():
+def _production_settings(**overrides):
+    """A production config that passes every gate unless a test breaks one."""
     from backend.config import Settings
 
-    safe = Settings(
+    base = dict(
         environment="production",
         secret_key="a-long-random-value-generated-with-secrets-token-urlsafe",
-        database_url="postgresql://user:pw@db/autograde",
+        database_url="postgresql+psycopg2://user:pw@db:5432/autograde",
+        llm_provider="openai",
+        openai_api_key="sk-a-real-looking-key",
+        canvas_base_url="https://canvas.example.edu",
         _env_file=None,
     )
-    assert safe.assert_production_ready() == []
+    base.update(overrides)
+    return Settings(**base)
 
 
-def test_sqlite_in_production_warns_but_does_not_block():
+def test_production_settings_with_real_values_pass():
+    assert _production_settings().assert_production_ready() == []
+
+
+def test_sqlite_is_refused_in_production():
     """
-    SQLite on a persistent disk is a legitimate single-instance choice, so
-    it must not stop the boot - but it should say so.
+    Production runs the API and the worker as separate processes against one
+    database. SQLite serialises writers, has no FOR UPDATE SKIP LOCKED, and
+    on ephemeral container storage the gradebook is lost on redeploy.
     """
-    from backend.config import Settings
+    with pytest.raises(ValueError, match="SQLite|DATABASE_URL"):
+        _production_settings(
+            database_url="sqlite:///./autograde.db").assert_production_ready()
 
-    sqlite_prod = Settings(
-        environment="production",
-        secret_key="a-long-random-value-generated-with-secrets-token-urlsafe",
-        database_url="sqlite:///./autograde.db",
-        _env_file=None,
-    )
-    warnings = sqlite_prod.assert_production_ready()
-    assert any("SQLite" in w for w in warnings)
+
+def test_default_database_url_is_refused_in_production():
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        _production_settings(
+            database_url="sqlite:///./autograde.db").assert_production_ready()
+
+
+def test_unconfigured_provider_is_refused_in_production():
+    """Booting with no usable key would fail every submission at grade time."""
+    with pytest.raises(ValueError, match="provider"):
+        _production_settings(openai_api_key="").assert_production_ready()
+
+
+def test_placeholder_secret_from_env_example_is_refused():
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        _production_settings(
+            secret_key="generate_a_random_secret_here_padded_to_length"
+        ).assert_production_ready()
 
 
 def test_short_secret_key_is_rejected_in_production():
@@ -344,62 +358,28 @@ def test_graded_count_includes_flagged_submissions(db_session):
 
 # ---------------------------------------------------------------------
 # M - two batches must not grade the same assignment at once
+#
+# Duplicate prevention moved from an assignment-status check to the job
+# queue's partial unique index; these now test it where it lives.
 # ---------------------------------------------------------------------
-def test_second_grading_run_is_rejected_while_one_is_in_flight(db_session):
+def test_second_grading_request_is_rejected_while_one_is_queued(
+        client, professor, assignment, mock_claude):
     """
-    A double-click or a second tab would otherwise grade every submission
-    twice - double the model spend - and race on the unique
-    grade_results.submission_id, marking good submissions as errored.
+    A double-click would otherwise grade every submission twice - double the
+    model spend - and race on the unique grade_results.submission_id.
     """
-    from backend.models.assignment import Assignment, AssignmentStatus
-    from backend.models.course import Course
-    from backend.models.user import User
-    from backend.services.grading_service import (
-        GradingInProgressError, grade_assignment,
-    )
+    mock_claude([grading_payload()])
+    upload_sample(client, assignment["id"], professor["headers"],
+                  "good_submission.html")
 
-    user = User(email="p2@x.edu", name="P", password_hash="x", role="professor")
-    db_session.add(user); db_session.commit()
-    course = Course(name="C", user_id=user.id)
-    db_session.add(course); db_session.commit()
-    assignment = Assignment(course_id=course.id, name="A",
-                            total_possible_points=100,
-                            status=AssignmentStatus.GRADING)
-    db_session.add(assignment); db_session.commit()
+    first = client.post(f"/api/assignments/{assignment['id']}/grade",
+                        json={}, headers=professor["headers"])
+    assert first.status_code == 202
 
-    with pytest.raises(GradingInProgressError):
-        grade_assignment(db_session, assignment)
-
-
-def test_a_stale_grading_lock_is_taken_over(db_session):
-    """A run that died must not block the assignment forever."""
-    from datetime import datetime, timedelta
-
-    from backend.models.assignment import Assignment, AssignmentStatus
-    from backend.models.course import Course
-    from backend.models.user import User
-    from backend.services.grading_service import (
-        GRADING_LOCK_TIMEOUT, grade_assignment,
-    )
-
-    user = User(email="p3@x.edu", name="P", password_hash="x", role="professor")
-    db_session.add(user); db_session.commit()
-    course = Course(name="C", user_id=user.id)
-    db_session.add(course); db_session.commit()
-    assignment = Assignment(course_id=course.id, name="A",
-                            total_possible_points=100,
-                            status=AssignmentStatus.GRADING)
-    db_session.add(assignment); db_session.commit()
-    # Backdate past the lock timeout without tripping onupdate.
-    stale = datetime.utcnow() - GRADING_LOCK_TIMEOUT - timedelta(minutes=1)
-    db_session.query(Assignment).filter(Assignment.id == assignment.id).update(
-        {"updated_at": stale}, synchronize_session=False)
-    db_session.commit()
-    db_session.refresh(assignment)
-
-    # No submissions, so this returns an empty summary rather than raising.
-    summary = grade_assignment(db_session, assignment)
-    assert summary["graded"] == 0
+    second = client.post(f"/api/assignments/{assignment['id']}/grade",
+                         json={}, headers=professor["headers"])
+    assert second.status_code == 409
+    assert "already being graded" in second.json()["detail"]
 
 
 # ---------------------------------------------------------------------

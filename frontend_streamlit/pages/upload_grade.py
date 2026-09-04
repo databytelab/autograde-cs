@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import sys
+import time
 from html import escape
 from pathlib import Path
 
@@ -175,40 +176,79 @@ else:
         f"{target_count * 15}s to {target_count * 40}s."
     )
 
+    # Grading is a background job, so the page's job is to reflect one
+    # rather than to run one. `latest_job` is what makes this survive a
+    # refresh: the browser forgets, the assignment does not.
+    job = api_client.latest_job(assignment["id"])
+    running = bool(job and job["status"] in ("queued", "running"))
+
     if st.button(f"Grade {target_count} submission(s)", type="primary",
-                 disabled=target_count == 0):
-        with st.spinner("Grading. This runs one model call per submission..."):
-            outcome = api_client.grade(
-                assignment["id"], regrade=regrade, include_images=include_images
-            )
+                 disabled=target_count == 0 or running):
+        started = api_client.grade(
+            assignment["id"], regrade=regrade, include_images=include_images
+        )
+        if started:
+            st.session_state["active_job_id"] = started["id"]
+            st.rerun()
 
-        if outcome:
-            st.success(
-                f"Graded {outcome['graded']}, skipped {outcome['skipped']}, "
-                f"failed {outcome['failed']}."
-            )
-            for result in outcome["results"]:
-                if result["ok"] and result.get("letter_grade"):
-                    chips = flag_chips(result.get("flags") or [])
-                    # Escaped: this line is rendered with unsafe_allow_html so
-                    # the chips work, and the name is editable through the API.
-                    name = escape(str(result["student_name"] or "(unknown)"))
-                    st.markdown(
-                        f"- **{name}** — "
-                        f"{result['total_score']:g} "
-                        f"({result['percentage']:g}%, "
-                        f"{escape(str(result['letter_grade']))}) "
-                        f"{chips}",
-                        unsafe_allow_html=True,
-                    )
-                elif not result["ok"]:
-                    st.markdown(
-                        f"- **{result['student_name'] or '(unknown)'}** — "
-                        f"{result['error']}"
-                    )
+    if running:
+        done, total = job["processed"], max(job["total"], 1)
+        st.progress(
+            min(done / total, 1.0),
+            text=(f"{job['status'].title()} — {done} of {job['total']} "
+                  f"submission(s) processed"),
+        )
+        st.caption(
+            "This runs in the background. You can close this page or come "
+            "back later; grading continues on the server."
+        )
+        if st.button("Cancel this run"):
+            api_client.cancel_job(job["id"])
+            st.rerun()
 
+        # Poll. Sleeping in the script rather than pulling in an autorefresh
+        # dependency; two seconds is responsive enough for a run measured in
+        # minutes, and a queued button click is picked up on the next pass.
+        time.sleep(2)
+        st.rerun()
+
+    elif job:
+        _JOB_NOTE = {
+            "completed": st.success,
+            "failed": st.error,
+            "cancelled": st.warning,
+        }
+        note = _JOB_NOTE.get(job["status"], st.info)
+        note(
+            f"Last run {job['status']}: graded {job['graded']}, "
+            f"skipped {job['skipped']}, failed {job['failed']}."
+            + (f" {job['error_message']}" if job.get("error_message") else "")
+        )
+
+        for result in job.get("results") or []:
+            if result["ok"] and result.get("letter_grade"):
+                chips = flag_chips(result.get("flags") or [])
+                # Escaped: this line is rendered with unsafe_allow_html so
+                # the chips work, and the name is editable through the API.
+                name = escape(str(result["student_name"] or "(unknown)"))
+                st.markdown(
+                    f"- **{name}** — "
+                    f"{result['total_score']:g} "
+                    f"({result['percentage']:g}%, "
+                    f"{escape(str(result['letter_grade']))}) "
+                    f"{chips}",
+                    unsafe_allow_html=True,
+                )
+            elif not result["ok"]:
+                st.markdown(
+                    f"- **{escape(str(result['student_name'] or '(unknown)'))}** — "
+                    f"{escape(str(result['error']))}"
+                )
+
+        if job["status"] == "completed":
             page_link("pages/review_results.py",
-                         label="Next: review the results", icon=":material/fact_check:")
+                      label="Next: review the results",
+                      icon=":material/fact_check:")
 
 # ---------------------------------------------------------------------
 # Similarity

@@ -11,10 +11,12 @@ import io
 
 import pytest
 
-from tests.conftest import SAMPLES, SIMPLE_RUBRIC, grading_payload, upload_sample
+from tests.conftest import (
+    SAMPLES, SIMPLE_RUBRIC, grade_now, grading_payload, upload_sample,
+)
 
 
-def test_the_whole_workflow(client, professor, mock_claude):
+def test_the_whole_workflow(client, professor, mock_claude, db_session):
     """
     Register -> course -> assignment -> upload -> grade -> review ->
     override -> finalize -> similarity scan -> export.
@@ -56,8 +58,7 @@ def test_the_whole_workflow(client, professor, mock_claude):
     assert body["failed"] == 0
 
     # --- 4. Grade the batch --------------------------------------------
-    grading = client.post(f"/api/assignments/{assignment['id']}/grade",
-                          json={}, headers=headers).json()
+    grading = grade_now(client, db_session, assignment["id"], headers)
 
     assert grading["graded"] == 7
     assert grading["failed"] == 1, "the corrupt notebook must fail alone"
@@ -158,7 +159,7 @@ def test_the_whole_workflow(client, professor, mock_claude):
 
 def test_parsed_content_is_cached_and_reused(
     client, professor, assignment, mock_claude
-):
+, db_session):
     """A regrade must not re-parse - that is what parsed_content is for."""
     fake = mock_claude()
     upload = upload_sample(client, assignment["id"], professor["headers"],
@@ -169,8 +170,7 @@ def test_parsed_content_is_cached_and_reused(
                         headers=professor["headers"]).json()
     assert before["parsed_content"] is None
 
-    client.post(f"/api/assignments/{assignment['id']}/grade", json={},
-                headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"])
 
     after = client.get(f"/api/submissions/{submission_id}",
                        headers=professor["headers"]).json()
@@ -182,22 +182,20 @@ def test_parsed_content_is_cached_and_reused(
 
 def test_regrade_invalidates_a_previous_approval(
     client, professor, assignment, mock_claude
-):
+, db_session):
     """A regraded result must not stay marked as approved."""
     fake = mock_claude()
     upload = upload_sample(client, assignment["id"], professor["headers"],
                            "good_submission.ipynb")
     submission_id = upload.json()["results"][0]["submission_id"]
 
-    client.post(f"/api/assignments/{assignment['id']}/grade", json={},
-                headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"])
     result = client.get(f"/api/submissions/{submission_id}/result",
                         headers=professor["headers"]).json()
     client.post(f"/api/results/{result['id']}/finalize", json={"finalized": True},
                 headers=professor["headers"])
 
-    client.post(f"/api/assignments/{assignment['id']}/grade",
-                json={"regrade": True}, headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"], regrade=True)
 
     after = client.get(f"/api/submissions/{submission_id}/result",
                        headers=professor["headers"]).json()
@@ -216,8 +214,7 @@ def test_deleting_an_assignment_removes_its_files_and_rows(
     mock_claude()
     upload_sample(client, assignment["id"], professor["headers"],
                   "good_submission.ipynb", "good_submission.py")
-    client.post(f"/api/assignments/{assignment['id']}/grade", json={},
-                headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"])
 
     paths = [Path(s.file_path) for s in db_session.query(Submission).all()]
     assert paths and all(p.exists() for p in paths)
@@ -233,7 +230,7 @@ def test_deleting_an_assignment_removes_its_files_and_rows(
 
 def test_grading_continues_after_an_api_failure_mid_batch(
     client, professor, assignment, mock_claude
-):
+, db_session):
     """
     An API error on one submission must not lose the ones already graded
     or block the ones after it.
@@ -248,8 +245,7 @@ def test_grading_continues_after_an_api_failure_mid_batch(
 
     # Grade the first one normally.
     first = upload.json()["results"][0]["submission_id"]
-    client.post(f"/api/assignments/{assignment['id']}/grade",
-                json={"submission_ids": [first]}, headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"], submission_ids=[first])
 
     # Now make every further call fail.
     fake.raises = anthropic.RateLimitError(
@@ -260,8 +256,7 @@ def test_grading_continues_after_an_api_failure_mid_batch(
         body=None,
     )
 
-    outcome = client.post(f"/api/assignments/{assignment['id']}/grade",
-                          json={}, headers=professor["headers"]).json()
+    outcome = grade_now(client, db_session, assignment["id"], professor["headers"])
 
     assert outcome["skipped"] == 1, "the already-graded one is left alone"
     assert outcome["failed"] == 2
@@ -283,13 +278,12 @@ def test_grading_continues_after_an_api_failure_mid_batch(
 
 def test_a_second_professor_sees_none_of_the_first_ones_data(
     client, professor, assignment, mock_claude
-):
+, db_session):
     """Full-stack ownership isolation, not just per-endpoint."""
     mock_claude()
     upload_sample(client, assignment["id"], professor["headers"],
                   "good_submission.ipynb")
-    client.post(f"/api/assignments/{assignment['id']}/grade", json={},
-                headers=professor["headers"])
+    grade_now(client, db_session, assignment["id"], professor["headers"])
 
     other = client.post("/api/auth/register", json={
         "email": "other@university.edu", "name": "Other Prof",
@@ -315,14 +309,13 @@ def test_a_second_professor_sees_none_of_the_first_ones_data(
 
 def test_html_and_notebook_of_the_same_work_both_grade(
     client, professor, assignment, mock_claude
-):
+, db_session):
     """Format must not change whether a submission is gradeable."""
     mock_claude()
     upload_sample(client, assignment["id"], professor["headers"],
                   "good_submission.ipynb", "good_submission.html",
                   "classic_submission.html", "generic.html")
 
-    outcome = client.post(f"/api/assignments/{assignment['id']}/grade",
-                          json={}, headers=professor["headers"]).json()
+    outcome = grade_now(client, db_session, assignment["id"], professor["headers"])
     assert outcome["graded"] == 4
     assert outcome["failed"] == 0

@@ -1,0 +1,141 @@
+# AutoGrade CS - production stack
+#
+#   cp .env.example .env      # then fill it in
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Only the proxy publishes a port. The API, the worker, the frontend and
+# PostgreSQL talk to each other on an internal network and are not reachable
+# from outside the host - so the API cannot be called around the proxy (which
+# would bypass rate limiting and TLS), and the database is not exposed at all.
+#
+# Six services, which is the minimum this design needs:
+#   caddy     TLS termination, security headers, body limit, public entrypoint
+#   frontend  Streamlit UI
+#   api       FastAPI - serves requests, never grades
+#   worker    grades; the only process that talks to the model provider
+#   db        PostgreSQL
+#   backup    periodic pg_dump with retention
+
+name: autograde
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?set PUBLIC_HOSTNAME in .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      MAX_REQUEST_BODY_MB: ${MAX_REQUEST_BODY_MB:-300}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # certificates - losing these means re-issuing
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - api
+    networks: [edge, internal]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    restart: unless-stopped
+    environment:
+      AUTOGRADE_API_BASE: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [internal]
+    expose: ["8501"]
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg2://autograde:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/autograde
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+    expose: ["8000"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    restart: unless-stopped
+    # Migrations are the API's job; the worker only waits for them and runs.
+    entrypoint: ["python", "-m", "backend.worker"]
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg2://autograde:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/autograde
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      # The worker reads the submission files it grades, so it needs the
+      # same volume as the API - not a copy.
+      - uploads:/app/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [internal]
+    # Scale with `--scale worker=N`; claiming is transactional, so several
+    # workers share the queue safely.
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autograde
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: autograde
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autograde -d autograde"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # No `ports:` on purpose. To inspect it, tunnel in:
+    #   docker compose -f docker-compose.prod.yml exec db psql -U autograde
+    networks: [internal]
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - ./docker/backup.sh:/usr/local/bin/backup.sh:ro
+      - backups:/backups
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  # Only caddy sits on `edge`; everything else is internal-only.
+  edge:
+  internal:
+    internal: true
+
+volumes:
+  pgdata:       # the gradebook
+  uploads:      # student submissions - not in the database
+  backups:      # pg_dump output; copy this off the host (see DEPLOYMENT.md)
+  caddy_data:
+  caddy_config:

@@ -75,6 +75,35 @@ def get_owned_submission(
     return submission
 
 
+def get_owned_job(
+    job_id: str = Path(..., description="Grading job id"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> "GradingJob":
+    """
+    A grading job the caller owns.
+
+    Ownership is checked through the course, not through `grading_jobs.user_id`
+    alone: a TA may start a run on a course they work on, and the professor
+    who owns the course must still be able to see and cancel it. The
+    `user_id` column records who started it; this decides who may touch it.
+    """
+    from backend.models.grading_job import GradingJob
+
+    job = (
+        db.query(GradingJob)
+        .join(Assignment, GradingJob.assignment_id == Assignment.id)
+        .join(Course, Assignment.course_id == Course.id)
+        .filter(GradingJob.id == job_id, Course.user_id == current_user.id)
+        .first()
+    )
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Grading job not found"
+        )
+    return job
+
+
 def get_owned_grade(
     grade_id: str = Path(..., description="Grade result id"),
     db: Session = Depends(get_db),

@@ -290,6 +290,30 @@ def sample(request) -> Path:
     return path
 
 
+def grade_now(client: TestClient, db_session, assignment_id: str,
+              headers: dict, **params):
+    """
+    Queue a grading run and drain it inline, returning the finished job.
+
+    Grading is asynchronous in production: the endpoint enqueues and a
+    worker runs the job. Tests go through that same path rather than a
+    synchronous shortcut - enqueue, then run the worker's own
+    `run_pending_jobs` against the test session - so what the suite
+    exercises is what actually ships.
+    """
+    from backend.services.job_service import run_pending_jobs
+
+    response = client.post(
+        f"/api/assignments/{assignment_id}/grade", json=params, headers=headers
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["id"]
+
+    run_pending_jobs(db_session, worker_id="pytest", max_jobs=3)
+
+    return client.get(f"/api/jobs/{job_id}", headers=headers).json()
+
+
 def upload_sample(client: TestClient, assignment_id: str, headers: dict,
                   *filenames: str):
     """Helper: POST one or more sample files as submissions."""
