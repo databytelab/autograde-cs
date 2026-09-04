@@ -31,8 +31,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import anthropic
-
 from backend.ai import prompts
 from backend.ai.providers import get_provider
 # Re-exported so existing imports (`from backend.ai.grader import GradingError`,
@@ -50,12 +48,18 @@ logger = logging.getLogger(__name__)
 # Kept here (rather than inside the Anthropic provider) so the test-suite,
 # which patches `grader.get_client`, keeps working unchanged. The Anthropic
 # provider pulls its client from here.
-_client: anthropic.Anthropic | None = None
+_client: Any = None
 
 
-def get_client() -> anthropic.Anthropic:
+def get_client() -> Any:
     """
     Return the shared Anthropic client, creating it on first use.
+
+    `anthropic` is imported here rather than at module scope so that an
+    OpenAI-only (or local-model-only) deployment does not have to install it
+    just to import the grader. Importing it at the top made the whole API
+    refuse to start when the package was absent, which is the opposite of
+    what a provider abstraction is for.
 
     Tests monkeypatch this function (or `backend.ai.grader._client`) to avoid
     any network access.
@@ -67,7 +71,17 @@ def get_client() -> anthropic.Anthropic:
                 "ANTHROPIC_API_KEY is not set. Add a real key to your .env file "
                 "before grading. See .env.example."
             )
-        _client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        try:
+            import anthropic
+        except ImportError as exc:  # pragma: no cover - only without the package
+            raise GradingError(
+                "The 'anthropic' package is not installed. Run: pip install anthropic"
+            ) from exc
+        _client = anthropic.Anthropic(
+            api_key=settings.anthropic_api_key,
+            timeout=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+        )
     return _client
 
 
@@ -83,6 +97,9 @@ def reset_client() -> None:
 _KNOWN_FLAGS = {
     "no_outputs", "runtime_error", "incomplete",
     "possible_ai_generated", "output_mismatch",
+    # Raised when the submission contains text aimed at the grader rather
+    # than at the assignment. Always worth a human look.
+    "prompt_injection",
 }
 
 

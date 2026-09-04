@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 from backend.ai.providers.base import GradingError, LLMProvider, extract_json
+from backend.config import settings
 
 try:  # openai is an optional dependency until a provider actually needs it
     import openai
@@ -37,12 +38,20 @@ def make_client(api_key: str, base_url: str | None):
     """
     Build an OpenAI client. Isolated in a module function so tests can patch
     it with a fake without any network access.
+
+    Timeout and retries are set explicitly: the SDK's 600s default is long
+    enough that a single stalled request holds up every submission behind it
+    in a batch. The SDK retries 429s and 5xx with exponential backoff.
     """
     if openai is None:
         raise GradingError(
             "The 'openai' package is not installed. Run: pip install openai"
         )
-    kwargs: dict[str, Any] = {"api_key": api_key or "not-needed"}
+    kwargs: dict[str, Any] = {
+        "api_key": api_key or "not-needed",
+        "timeout": settings.llm_timeout_seconds,
+        "max_retries": settings.llm_max_retries,
+    }
     if base_url:
         kwargs["base_url"] = base_url
     return openai.OpenAI(**kwargs)

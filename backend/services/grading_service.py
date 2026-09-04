@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import logging
 import statistics
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from backend.ai.grader import GradingError, grade_submission
 from backend.models.assignment import Assignment, AssignmentStatus
@@ -33,6 +33,16 @@ from backend.services.rubric_service import (
 from backend.utils.similarity import build_fingerprint, find_similar_pairs
 
 logger = logging.getLogger(__name__)
+
+# How long an assignment may sit in `grading` before another run assumes the
+# previous one died and takes over. Long enough for a real batch (a few
+# hundred submissions at ~20s each), short enough to self-heal after a crash
+# without an administrator having to touch the database.
+GRADING_LOCK_TIMEOUT = timedelta(hours=3)
+
+
+class GradingInProgressError(RuntimeError):
+    """Raised when an assignment is already being graded."""
 
 
 # ---------------------------------------------------------------------
@@ -147,7 +157,13 @@ def grade_one(
     grade.flags = result["flags"]
     grade.ai_raw_output = result["ai_raw_output"]
     grade.summary_feedback = result["summary_feedback"]
-    # A regrade invalidates a previous approval.
+    # A regrade invalidates a previous approval *and* the overrides that went
+    # with it. The overrides were judgements about the previous AI scores and
+    # are keyed by criterion id, so keeping them would silently reapply an old
+    # adjustment to a fresh grade - and, because `total_score` is set from the
+    # new AI result while `effective_score` re-adds the overrides, the export
+    # (effective_score) and the Canvas push (percentage) would disagree.
+    grade.professor_overrides = None
     grade.finalized = False
     grade.finalized_at = None
     grade.updated_at = datetime.utcnow()
@@ -181,9 +197,34 @@ def grade_assignment(
 
     Returns a summary dict matching schemas.submission.GradeResponse.
     """
+    # Refuse to run two batches over the same assignment at once. Without
+    # this, a double-click or a second browser tab grades every submission
+    # twice: double the model spend, and both runs race to create the same
+    # GradeResult row (submission_id is unique), so one of them fails and
+    # marks perfectly good submissions as errored. The lock self-heals - a
+    # run that died leaves the status behind, so an old timestamp is treated
+    # as abandoned rather than blocking the assignment forever.
+    if assignment.status == AssignmentStatus.GRADING:
+        started = assignment.updated_at or datetime.utcnow()
+        if datetime.utcnow() - started < GRADING_LOCK_TIMEOUT:
+            raise GradingInProgressError(
+                "This assignment is already being graded. Wait for that run to "
+                "finish before starting another."
+            )
+        logger.warning(
+            "Assignment %s has been in 'grading' since %s; assuming the "
+            "previous run died and taking over.", assignment.id, started,
+        )
+
     rubric = resolve_rubric(assignment)
 
-    query = db.query(Submission).filter(Submission.assignment_id == assignment.id)
+    # The loop below reads `grade_result` on every row to decide whether to
+    # skip it, so it is eager-loaded rather than lazily fetched per student.
+    query = (
+        db.query(Submission)
+        .options(joinedload(Submission.grade_result))
+        .filter(Submission.assignment_id == assignment.id)
+    )
     if submission_ids:
         query = query.filter(Submission.id.in_(submission_ids))
     submissions = query.order_by(Submission.submitted_at).all()
@@ -302,6 +343,14 @@ def apply_overrides(
                 f"Criterion '{known[cid]['name']}' caps at {max_score} points; "
                 f"{new_score} was given."
             )
+        # The API schema also bounds this, but apply_overrides is reachable
+        # from scripts and future callers, so the invariant lives with the
+        # logic that depends on it rather than only at the edge.
+        if new_score < 0:
+            raise ValueError(
+                f"Criterion '{known[cid]['name']}' cannot be negative; "
+                f"{new_score} was given."
+            )
 
     merged = dict(grade.professor_overrides or {})
     merged.update({
@@ -403,10 +452,20 @@ def scan_similarity(
 # Statistics
 # ---------------------------------------------------------------------
 def assignment_stats(db: Session, assignment: Assignment) -> dict[str, Any]:
-    """Dashboard numbers for one assignment."""
-    submissions = db.query(Submission).filter(
-        Submission.assignment_id == assignment.id
-    ).all()
+    """
+    Dashboard numbers for one assignment.
+
+    The grade is eager-loaded: this walks every submission reading
+    `grade_result`, which lazily issued one SELECT per submission (203
+    statements for a 200-student assignment). The dashboard calls this once
+    per course, so the cost multiplied.
+    """
+    submissions = (
+        db.query(Submission)
+        .options(joinedload(Submission.grade_result))
+        .filter(Submission.assignment_id == assignment.id)
+        .all()
+    )
 
     percentages: list[float] = []
     finalized = 0

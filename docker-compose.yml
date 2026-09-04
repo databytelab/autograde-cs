@@ -46,7 +46,9 @@ services:
     profiles: ["postgres"]
     environment:
       POSTGRES_USER: autograde
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      # No default: a database that silently accepts a published password is
+      # worse than one that refuses to start. Set POSTGRES_PASSWORD in .env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: autograde
     volumes:
       - pgdata:/var/lib/postgresql/data

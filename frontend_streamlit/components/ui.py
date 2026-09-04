@@ -7,6 +7,7 @@ plain function call at the top of the file rather than a decorator.
 """
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
 import streamlit as st
@@ -58,6 +59,7 @@ FLAG_LABELS = {
     "output_mismatch": "Output mismatch",
     "grader_error": "Grader error - review manually",
     "score_clamped": "Score clamped to the maximum",
+    "prompt_injection": "Tried to instruct the grader - review manually",
 }
 
 
@@ -248,18 +250,25 @@ def grade_badge(letter: str | None, percentage: float | None) -> str:
     return (
         f"<span style='background:{color};color:white;padding:2px 10px;"
         f"border-radius:10px;font-weight:600;font-size:0.85em'>"
-        f"{letter}{pct}</span>"
+        f"{escape(str(letter))}{pct}</span>"
     )
 
 
 def flag_chips(flags: list[str]) -> str:
-    """Human-readable chips for grader flags."""
+    """
+    Human-readable chips for grader flags.
+
+    Escaped, because this is rendered with `unsafe_allow_html=True` and an
+    unrecognised flag falls through to the model's own string. Model output
+    is shaped by the student's submission, so it is untrusted text and must
+    not be able to inject markup into the professor's browser.
+    """
     if not flags:
         return ""
     chips = [
         f"<span style='background:#FDEBEB;color:#B02020;padding:2px 8px;"
         f"border-radius:8px;font-size:0.78em;margin-right:5px'>"
-        f"{FLAG_LABELS.get(f, f)}</span>"
+        f"{escape(FLAG_LABELS.get(f, str(f)))}</span>"
         for f in flags
     ]
     return "".join(chips)

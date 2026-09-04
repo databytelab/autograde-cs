@@ -14,7 +14,10 @@ alembic==1.13.1
 psycopg2-binary==2.9.9        # PostgreSQL driver, production only
 
 # Auth
-python-jose[cryptography]==3.3.0
+# 3.4.0 fixes CVE-2024-33664 (a crafted JWE decompresses to exhaust memory -
+# reachable unauthenticated, since every protected route decodes the token a
+# caller supplies) and CVE-2024-33663 (algorithm confusion). Do not downgrade.
+python-jose[cryptography]==3.4.0
 # bcrypt is used directly, not through passlib: passlib 1.7.x reads
 # bcrypt.__about__.__version__, which bcrypt 4+ removed, so the pair
 # raises at hash time. See backend/utils/auth_utils.py.

@@ -107,6 +107,28 @@ _SUMMARY_COLUMNS = [
 ]
 
 
+# Excel, LibreOffice and Google Sheets treat a cell beginning with any of
+# these as a formula. Several columns here carry text that a student can
+# influence - `summary_feedback` is model output written about their own
+# submission - so a spreadsheet built from them is untrusted content that a
+# professor then opens on their own machine.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _spreadsheet_safe(value: Any) -> Any:
+    """
+    Neutralise formula injection in a cell destined for a spreadsheet.
+
+    Only strings are touched, so numeric scores (including negative ones)
+    keep their type and still sum correctly. A leading apostrophe is the
+    conventional escape: spreadsheet programs strip it on display and treat
+    the rest as literal text.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 # ---------------------------------------------------------------------
 # CSV
 # ---------------------------------------------------------------------
@@ -119,7 +141,9 @@ def to_csv(rows: list[dict[str, Any]]) -> bytes:
     )
     writer.writeheader()
     for row in rows:
-        writer.writerow({k: row.get(k, "") for k in _SUMMARY_COLUMNS})
+        writer.writerow(
+            {k: _spreadsheet_safe(row.get(k, "")) for k in _SUMMARY_COLUMNS}
+        )
     # utf-8-sig so Excel opens accented names correctly on Windows.
     return buffer.getvalue().encode("utf-8-sig")
 
@@ -146,10 +170,10 @@ def to_canvas_csv(rows: list[dict[str, Any]], assignment: Assignment) -> bytes:
 
     for row in rows:
         writer.writerow([
-            row["student_name"],
-            row["student_id"],
-            row["student_id"],
-            row["student_email"],
+            _spreadsheet_safe(row["student_name"]),
+            _spreadsheet_safe(row["student_id"]),
+            _spreadsheet_safe(row["student_id"]),
+            _spreadsheet_safe(row["student_email"]),
             "" if row["score"] is None else row["score"],
         ])
 
@@ -167,7 +191,8 @@ def to_xlsx(rows: list[dict[str, Any]], assignment: Assignment) -> bytes:
                    any professor override, and the reasoning
     """
     summary = pd.DataFrame(
-        [{k: row.get(k) for k in _SUMMARY_COLUMNS} for row in rows],
+        [{k: _spreadsheet_safe(row.get(k)) for k in _SUMMARY_COLUMNS}
+         for row in rows],
         columns=_SUMMARY_COLUMNS,
     )
 
@@ -175,7 +200,7 @@ def to_xlsx(rows: list[dict[str, Any]], assignment: Assignment) -> bytes:
     for row in rows:
         for criterion in row["criteria"]:
             override = row["overrides"].get(criterion["criterion_id"], {})
-            criteria_rows.append({
+            criteria_rows.append({k: _spreadsheet_safe(v) for k, v in {
                 "student_name": row["student_name"],
                 "criterion": criterion.get("name"),
                 "criterion_id": criterion.get("criterion_id"),
@@ -186,7 +211,7 @@ def to_xlsx(rows: list[dict[str, Any]], assignment: Assignment) -> bytes:
                 "flags": ", ".join(criterion.get("flags") or []),
                 "feedback": criterion.get("feedback", ""),
                 "reasoning": criterion.get("reasoning", ""),
-            })
+            }.items()})
 
     criteria = pd.DataFrame(criteria_rows) if criteria_rows else pd.DataFrame(
         columns=["student_name", "criterion", "criterion_id", "ai_score",

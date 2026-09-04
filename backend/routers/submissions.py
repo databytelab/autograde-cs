@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -38,7 +39,11 @@ from backend.schemas.submission import (
     UploadResponse,
     UploadResult,
 )
-from backend.services.grading_service import grade_assignment, scan_similarity
+from backend.services.grading_service import (
+    GradingInProgressError,
+    grade_assignment,
+    scan_similarity,
+)
 from backend.utils.auth_utils import get_current_user
 from backend.utils.file_utils import (
     FileTooLargeError,
@@ -49,9 +54,15 @@ from backend.utils.file_utils import (
     save_upload,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["submissions"])
 
 _SUBMISSION_EXTS = {".ipynb", ".html", ".htm", ".py"}
+
+# A class is a few hundred students. Anything past this is a malformed or
+# hostile archive, not a submission bundle.
+MAX_ZIP_MEMBERS = 1000
 
 
 def _persist_one(
@@ -99,9 +110,33 @@ def _persist_one(
 
 
 def _zip_members(data: bytes) -> Iterator[tuple[str, bytes]]:
-    """Yield (basename, bytes) for each gradeable file in a zip archive."""
+    """
+    Yield (basename, bytes) for each gradeable file in a zip archive.
+
+    A zip is untrusted input, so two limits apply *before* anything is
+    decompressed:
+
+      * `info.file_size` (the declared uncompressed size) is checked against
+        the per-file limit. Without this a few KB on disk can expand to
+        gigabytes in memory - `archive.read()` has no size ceiling of its
+        own, and the streaming check in `save_upload` happens too late to
+        prevent the expansion.
+      * at most MAX_ZIP_MEMBERS files are taken, so an archive of a million
+        one-byte entries cannot turn into a million database rows.
+
+    Over-sized members are skipped rather than failing the whole upload: one
+    bad file in a Canvas bundle must not reject the other 199.
+    """
+    max_bytes = settings.max_file_size_mb * 1024 * 1024
+    taken = 0
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         for info in archive.infolist():
+            if taken >= MAX_ZIP_MEMBERS:
+                logger.warning(
+                    "Zip contains more than %d gradeable files; the rest were "
+                    "ignored.", MAX_ZIP_MEMBERS,
+                )
+                break
             if info.is_dir() or "__MACOSX" in info.filename:
                 continue
             base = info.filename.replace("\\", "/").split("/")[-1]
@@ -109,6 +144,14 @@ def _zip_members(data: bytes) -> Iterator[tuple[str, bytes]]:
                 continue
             if Path(base).suffix.lower() not in _SUBMISSION_EXTS:
                 continue
+            if info.file_size > max_bytes:
+                logger.warning(
+                    "Skipping %s from zip: declared uncompressed size %d bytes "
+                    "exceeds the %d MB limit.",
+                    base, info.file_size, settings.max_file_size_mb,
+                )
+                continue
+            taken += 1
             yield base, archive.read(info)
 
 
@@ -279,12 +322,18 @@ def grade(
     rather than failing the request.
     """
     payload = payload or GradeRequest()
-    summary = grade_assignment(
-        db, assignment,
-        submission_ids=payload.submission_ids,
-        regrade=payload.regrade,
-        include_images=payload.include_images,
-    )
+    try:
+        summary = grade_assignment(
+            db, assignment,
+            submission_ids=payload.submission_ids,
+            regrade=payload.regrade,
+            include_images=payload.include_images,
+        )
+    except GradingInProgressError as exc:
+        # 409, not 500: the request was valid, the resource is busy.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     return GradeResponse(**summary)
 
 

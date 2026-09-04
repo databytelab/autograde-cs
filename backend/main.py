@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -31,7 +31,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Startup checks. Surfaces a missing API key before a professor
-    uploads 200 notebooks and only then discovers grading is offline."""
+    uploads 200 notebooks and only then discovers grading is offline, and
+    refuses to boot a production deployment on development defaults."""
+    for warning in settings.assert_production_ready():
+        logger.warning("Deployment warning: %s", warning)
     upload_root()
     logger.info(
         "AutoGrade CS started (env=%s, db=%s, llm_provider=%s, grading=%s)",
@@ -141,22 +144,40 @@ app.include_router(export.router)
 
 
 @app.get("/api/health", tags=["health"])
-async def health() -> dict:
+async def health(response: Response) -> dict:
     """
     Liveness plus a readiness summary.
+
+    The database is actually queried rather than assumed. A container whose
+    schema has never been migrated used to report healthy while every real
+    request returned 500, so an orchestrator happily routed traffic to a
+    backend that could not serve any of it.
 
     `llm_configured` being false means everything works except grading -
     which is worth surfacing before a professor uploads 200 notebooks.
     `llm_provider` says which backend (openai / anthropic / local) will run.
     `anthropic_configured` is kept for backward compatibility.
     """
+    from sqlalchemy import text
+
+    from backend.database import SessionLocal
     from backend.services.canvas_service import is_configured as canvas_configured
+
+    database_ok = True
+    try:
+        with SessionLocal() as session:
+            session.execute(text("SELECT 1"))
+    except Exception:  # noqa: BLE001 - any failure means "do not send traffic"
+        logger.exception("Health check could not reach the database")
+        database_ok = False
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     key = settings.anthropic_api_key
     return {
-        "status": "ok",
+        "status": "ok" if database_ok else "degraded",
         "version": "1.0.0",
         "environment": settings.environment,
+        "database_ok": database_ok,
         "llm_provider": settings.active_provider(),
         "llm_configured": settings.grading_configured(),
         "anthropic_configured": bool(key and not key.startswith("your_")),

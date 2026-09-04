@@ -7,6 +7,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Numeric, Text
 from sqlalchemy.orm import relationship
 from backend.database import Base
+from backend.models.submission import SubmissionStatus
 
 class AssignmentStatus(str):
     PENDING  = "pending"    # created, no submissions yet
@@ -51,7 +52,15 @@ class Assignment(Base):
 
     @property
     def graded_count(self) -> int:
-        return sum(1 for s in self.submissions if s.status == "graded")
+        # "flagged" is a *graded* submission that carries an integrity or
+        # quality flag, so it counts here. Excluding it made this disagree
+        # with assignment_stats (which counts submissions that have a grade)
+        # and under-reported progress on exactly the submissions a professor
+        # most needs to look at.
+        return sum(
+            1 for s in self.submissions
+            if s.status in (SubmissionStatus.GRADED, SubmissionStatus.FLAGGED)
+        )
 
     def __repr__(self):
         return f"<Assignment {self.name}>"

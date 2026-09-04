@@ -196,11 +196,14 @@ def fake_backend(monkeypatch):
     return install
 
 
-def run_page(path: Path, *, signed_in: bool = True) -> AppTest:
+def run_page(path: Path, *, signed_in: bool = True,
+             session_state: dict | None = None) -> AppTest:
     app = AppTest.from_file(str(path), default_timeout=30)
     if signed_in:
         app.session_state["token"] = "fake-token"
         app.session_state["user"] = USER
+    for key, value in (session_state or {}).items():
+        app.session_state[key] = value
     return app.run()
 
 
@@ -231,9 +234,27 @@ def test_pages_require_sign_in(name, fake_backend):
 # ---------------------------------------------------------------------
 # Home
 # ---------------------------------------------------------------------
-def test_home_shows_the_sign_in_form_when_signed_out(fake_backend):
+def test_home_shows_the_landing_page_when_signed_out(fake_backend):
+    """
+    The signed-out home is the marketing surface: the pitch, the workflow
+    and the two calls to action. The credential fields live in the auth
+    view that those buttons open (see the test below), not in the hero.
+    """
     fake_backend()
     app = run_page(PAGES["app"], signed_in=False)
+    assert not app.exception
+    button_labels = {b.label for b in app.button}
+    assert "Sign in to start" in button_labels
+    assert "Create account" in button_labels
+
+
+def test_home_shows_the_credential_fields_in_the_auth_view(fake_backend):
+    """Choosing "Sign in to start" must lead to a real, usable form."""
+    import streamlit as st
+
+    fake_backend()
+    app = run_page(PAGES["app"], signed_in=False,
+                   session_state={"ag_view": "signin"})
     assert not app.exception
     labels = {w.label for w in app.text_input}
     assert "Email" in labels

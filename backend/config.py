@@ -3,6 +3,8 @@ Central configuration — reads all values from .env file.
 NEVER import os.environ directly in other files.
 Always use: from backend.config import settings
 """
+from typing import ClassVar
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -41,11 +43,22 @@ class Settings(BaseSettings):
     anthropic_grading_model: str = "claude-opus-5"
     anthropic_rubric_model: str = "claude-opus-5"
 
+    # ── LLM call limits ───────────────────────────────────────
+    # Both SDKs default to a 600s timeout, which is far too long inside a
+    # batch: one hung request stalls every submission behind it. Retries are
+    # made explicit here rather than inherited from an SDK default, so the
+    # behaviour is visible and tunable.
+    llm_timeout_seconds: float = 120.0
+    llm_max_retries: int = 3
+
     # ── Database ──────────────────────────────────────────────
     # SQLite for local dev, PostgreSQL for production
     database_url: str = "sqlite:///./autograde.db"
 
     # ── Auth (JWT) ────────────────────────────────────────────
+    # This default is a development convenience and is refused outside
+    # development by `assert_production_ready()`. Anyone who knows it can
+    # mint a valid token for any account, so it must never ship.
     secret_key: str = "change-this-in-production"
     algorithm: str = "HS256"
     # 480 minutes = 8 hours (a full working day session)
@@ -67,6 +80,58 @@ class Settings(BaseSettings):
     canvas_api_token: str = ""
 
     # -- Convenience helpers -----------------------------------
+    # The signing key shipped in .env.example / as the field default. Running
+    # with it means every issued JWT can be forged by anyone with the source.
+    DEFAULT_SECRET_KEY: ClassVar[str] = "change-this-in-production"
+    MIN_SECRET_KEY_LENGTH: ClassVar[int] = 32
+
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() in ("production", "prod", "staging")
+
+    def assert_production_ready(self) -> list[str]:
+        """
+        Refuse to start a non-development deployment with an unsafe secret,
+        and return any non-fatal warnings for the caller to log.
+
+        The split is deliberate. A forgeable signing key is a security hole
+        with no legitimate use, so it fails the boot - a silently insecure
+        production process is far worse than a refused start. SQLite, by
+        contrast, is a reasonable choice for a single-instance deployment on
+        a persistent disk, so it warns rather than blocks.
+
+        Development keeps the convenient defaults and is never checked.
+        """
+        if not self.is_production():
+            return []
+
+        problems: list[str] = []
+        if self.secret_key == self.DEFAULT_SECRET_KEY:
+            problems.append(
+                "SECRET_KEY is still the built-in default, so anyone with the "
+                "source can mint a token for any account. Generate one with "
+                "`python -c \"import secrets; print(secrets.token_urlsafe(48))\"`"
+            )
+        elif len(self.secret_key) < self.MIN_SECRET_KEY_LENGTH:
+            problems.append(
+                f"SECRET_KEY is shorter than {self.MIN_SECRET_KEY_LENGTH} "
+                "characters and is too easy to brute-force."
+            )
+        if problems:
+            raise ValueError(
+                f"Refusing to start in environment '{self.environment}':\n  - "
+                + "\n  - ".join(problems)
+            )
+
+        warnings: list[str] = []
+        if self.database_url.startswith("sqlite"):
+            warnings.append(
+                "DATABASE_URL points at SQLite. That is workable for a single "
+                "instance on a persistent disk, but it serialises writes and "
+                "is lost on ephemeral container storage. Use PostgreSQL once "
+                "more than one worker or machine is involved."
+            )
+        return warnings
+
     def active_provider(self) -> str:
         """The provider name, normalised to lowercase."""
         return (self.llm_provider or "openai").strip().lower()

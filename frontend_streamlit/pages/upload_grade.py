@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import sys
+from html import escape
 from pathlib import Path
 
 # Streamlit puts only this file's directory on sys.path - see app.py.
@@ -189,10 +190,14 @@ else:
             for result in outcome["results"]:
                 if result["ok"] and result.get("letter_grade"):
                     chips = flag_chips(result.get("flags") or [])
+                    # Escaped: this line is rendered with unsafe_allow_html so
+                    # the chips work, and the name is editable through the API.
+                    name = escape(str(result["student_name"] or "(unknown)"))
                     st.markdown(
-                        f"- **{result['student_name'] or '(unknown)'}** — "
+                        f"- **{name}** — "
                         f"{result['total_score']:g} "
-                        f"({result['percentage']:g}%, {result['letter_grade']}) "
+                        f"({result['percentage']:g}%, "
+                        f"{escape(str(result['letter_grade']))}) "
                         f"{chips}",
                         unsafe_allow_html=True,
                     )

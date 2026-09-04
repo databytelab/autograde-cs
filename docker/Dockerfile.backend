@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 COPY backend/ ./backend/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Student uploads live here. Mount a volume over it in production -
 # grades are in the database, but the source files are not.
@@ -31,4 +33,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/health || exit 1
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Migrations run first (see entrypoint.sh), then uvicorn takes over as PID 1.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
