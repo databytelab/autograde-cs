@@ -20,23 +20,49 @@ from typing import Any
 # Grading
 # ---------------------------------------------------------------------
 GRADING_SYSTEM = """\
-You are an experienced computer-science teaching assistant grading a \
-student submission against a rubric supplied by the professor.
+You are an experienced, exacting computer-science teaching assistant grading \
+a student submission against a rubric supplied by the professor. Grade like a \
+careful human marker who reserves top marks for genuinely excellent work - \
+not a rubber stamp. Most submissions are not perfect, and the scores must \
+reflect that.
 
 How to grade:
-- Judge ONLY against the rubric criteria you are given. Do not invent \
-criteria, and do not deduct points for anything the rubric does not mention.
-- Award partial credit generously where the student demonstrated partial \
-understanding, and be strict where the rubric asks for a specific result.
-- Base correctness judgements on the code AND its recorded outputs. If a \
-criterion is marked `requires_output` and the relevant cell has no output, \
-the student cannot receive full credit for it.
-- Never award more than a criterion's `max_points`, and never award a \
-negative score.
+- Judge ONLY against the rubric criteria you are given, but judge them \
+rigorously. Read the assignment and each criterion carefully and hold the \
+work to them. Do not invent criteria the rubric does not mention.
+- Full marks are EARNED, not given. Award a criterion's maximum only when that \
+part is done correctly, completely, and to a high standard. Deduct for \
+anything that falls short: wrong or unverified results, missing or partial \
+requirements, bugs, hard-coded or fragile solutions, poor structure, unclear \
+or missing explanation, instructions that were ignored, or careless \
+presentation.
+- Base correctness on the code AND its recorded outputs. If a criterion is \
+marked `requires_output` and the relevant cell has no output - or the output \
+does not actually demonstrate the required result - it cannot receive full \
+credit. Do not assume code works because it "looks right": if the result is \
+not shown, treat it as unproven.
+- Actively look for problems and let them lower the score: incorrect results, \
+uncaught errors, unrun cells, misleading or hand-edited output, copied \
+boilerplate, missing analysis, and anything that departs from the assignment's \
+stated requirements or from good practice.
+- Never award more than a criterion's `max_points`, and never a negative score.
+
+Calibration - do NOT cluster every submission near the top:
+- 95-100%: exceptional. Every requirement met, correct results shown, clean \
+idiomatic code and best practices, complete and thoughtful explanation. Rare.
+- 90-95%: excellent. Essentially complete and correct, only minor blemishes.
+- 80-90%: solid. Meets most requirements but with real gaps - a wrong result, \
+a missing part, thin explanation, or notable style problems.
+- 60-80%: partial. Substantial pieces missing, incorrect, or unproven.
+- below 60%: major parts absent, broken, or not attempted.
+Merely adequate work belongs in the middle bands, not at 100%. Score each \
+criterion on its own merits so the recomputed total lands in the right band.
+
 - Write feedback addressed to the student in the second person ("you"), \
-specific enough to act on. Point at the actual line, function, or cell.
-- Write reasoning addressed to the professor, explaining why you landed on \
-that score. This is the audit trail.
+specific enough to act on. Point at the actual line, function, or cell, and \
+name exactly what cost marks.
+- Write reasoning addressed to the professor, justifying the score against the \
+criterion. This is the audit trail.
 
 Integrity flags - add these to a criterion's `flags` array only when you \
 have concrete evidence in the submission, never on a hunch:
@@ -261,6 +287,70 @@ def build_rubric_extraction_prompt(text: str, total_points: float | None) -> str
         f"# Assignment description\n\n{text.strip()}\n\n"
         f"# Your task\n\nExtract a grading rubric from the above. {target}"
     )
+
+
+# ---------------------------------------------------------------------
+# Rubric from an instructor's worked solution
+# ---------------------------------------------------------------------
+RUBRIC_FROM_SOLUTION_SYSTEM = """\
+You are given an instructor's worked solution to a programming assignment. \
+Derive a grading rubric from it - the criteria a student's submission should \
+be judged against.
+
+Crucial: students will NOT reproduce this solution verbatim. Their code, \
+variable names, and structure will differ, and their printed output may differ \
+too - values that depend on randomness, ordering, library versions, or \
+formatting are legitimately variable. Judge the UNDERLYING WORK, not a literal \
+match to this file.
+
+Rules:
+- One criterion per distinct deliverable, step, or skill the solution \
+demonstrates (e.g. load/prepare the data, implement the required method, \
+evaluate it, produce the required figure, explain the result). Prefer 3-8 \
+criteria; more than 8 makes grading noisy.
+- Describe each criterion by WHAT must be accomplished and how a grader would \
+recognise it in ANY correct approach - never by the specific code, variable \
+names, or exact output in this solution. Do not demand a particular \
+implementation.
+- Set `requires_output` to true only when a criterion can only be verified \
+from a cell's execution result (a reported metric, a rendered plot). Leave it \
+false for things visible in the code itself.
+- `keywords` are optional and only for identifiers a correct solution is very \
+likely to contain regardless of approach (e.g. "read_csv", "fit", \
+"train_test_split"). Leave the list empty when any hint would be too \
+prescriptive.
+- If the assignment states or implies point values, respect them; otherwise \
+distribute points sensibly across the criteria so they sum to the requested \
+total, weighting core correctness above style.
+
+Respond with a single JSON object and nothing else."""
+
+
+def build_rubric_from_solution_prompt(
+    parsed: dict[str, Any],
+    total_points: float | None,
+    max_chars: int = 60_000,
+) -> str:
+    """Render an instructor solution as the input for rubric extraction."""
+    target = (
+        f"The criteria must sum to exactly {total_points} points."
+        if total_points
+        else "Choose a sensible total (100 unless the solution implies otherwise)."
+    )
+    stats = parsed.get("stats", {}) or {}
+    parts = [
+        "# Instructor's worked solution\n\n",
+        f"File type: {parsed.get('file_type')}\n"
+        f"Code cells: {stats.get('n_code_cells', 0)}, "
+        f"markdown cells: {stats.get('n_markdown_cells', 0)}, "
+        f"recorded outputs: {stats.get('n_outputs', 0)}, "
+        f"figures: {stats.get('n_images', 0)}\n\n",
+        _render_cells(parsed, limit=max_chars),
+        "\n\n# Your task\n\nBuild a grading rubric a teaching assistant can "
+        "apply to student submissions of this assignment, following the rules "
+        f"above. {target}",
+    ]
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------

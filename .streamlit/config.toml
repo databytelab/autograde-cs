@@ -1,0 +1,19 @@
+# AutoGrade CS theme — a warm, restrained palette inspired by Anthropic's
+# own site: a soft cream background, a muted terracotta accent, warm near-black
+# text. This is Streamlit's built-in theming (colours only) — it changes no
+# layout and adds no custom CSS, so it stays clean and is trivially reverted.
+
+[theme]
+base = "light"
+primaryColor = "#CC785C"            # muted terracotta / "Claude" coral — buttons, links, active tabs
+backgroundColor = "#FAF9F5"         # soft warm cream (not stark white)
+secondaryBackgroundColor = "#F0EEE6" # warm sand — sidebar, inputs, table headers
+textColor = "#2B2A27"               # warm near-black
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# Hide Streamlit's auto file-name navigation (the lowercase "app / dashboard /
+# ..." list). The app renders its own capitalised "Workflow" navigation.
+showSidebarNavigation = false

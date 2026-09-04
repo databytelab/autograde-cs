@@ -14,10 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from frontend_streamlit.components import api_client
 from frontend_streamlit.components.ui import page_link, course_selector, page_setup, require_auth
 
-page_setup("New assignment", "📝")
+page_setup("New assignment")
 require_auth()
 
-st.title("📝 New assignment")
+st.title("New assignment")
 
 # ---------------------------------------------------------------------
 # Courses
@@ -60,6 +60,7 @@ if "draft_rubric" not in st.session_state:
 method = st.radio(
     "How do you want to define it?",
     ["Describe the assignment (AI builds the rubric)",
+     "Upload a solution file (AI reads it and builds the rubric)",
      "Paste rubric JSON",
      "Use the default CS rubric"],
     horizontal=False,
@@ -86,6 +87,39 @@ if method.startswith("Describe"):
         if draft:
             st.session_state["draft_rubric"] = draft
             st.session_state["draft_raw_text"] = prose
+            st.session_state["pending_solution"] = None
+
+# -- Option A2: instructor solution file -> AI -------------------------
+elif method.startswith("Upload"):
+    st.caption(
+        "Upload your worked solution (`.ipynb` / `.html` / `.py`). The AI reads "
+        "it and builds a rubric that judges *what the student accomplished* - "
+        "not an exact match. Student code, structure, and output legitimately "
+        "vary, so the criteria describe the underlying work. Review and edit the "
+        "result below before creating the assignment. The same file is attached "
+        "as the grading reference when you create the assignment."
+    )
+    solution_file = st.file_uploader(
+        "Solution file", type=["ipynb", "html", "htm", "py"],
+        key="rubric_solution_file",
+    )
+    sol_points = st.number_input(
+        "Total points", 1.0, 1000.0, 100.0, step=5.0, key="sol_points"
+    )
+    if st.button("Build rubric from solution", type="primary",
+                 disabled=solution_file is None):
+        with st.spinner("Reading your solution and building the rubric..."):
+            draft = api_client.preview_rubric_from_solution(solution_file, sol_points)
+        if draft:
+            st.session_state["draft_rubric"] = draft
+            st.session_state["draft_raw_text"] = None
+            # Keep the file so it can be attached as the reference solution
+            # once the assignment exists.
+            st.session_state["pending_solution"] = {
+                "name": solution_file.name,
+                "bytes": solution_file.getvalue(),
+            }
+            st.success("Rubric built. Review it below, then create the assignment.")
 
 # -- Option B: raw JSON --------------------------------------------------
 elif method.startswith("Paste"):
@@ -107,6 +141,7 @@ elif method.startswith("Paste"):
         try:
             st.session_state["draft_rubric"] = json.loads(pasted)
             st.session_state["draft_raw_text"] = None
+            st.session_state["pending_solution"] = None
             st.success("Parsed. Check the preview below, then create the assignment.")
         except json.JSONDecodeError as exc:
             st.error(f"That is not valid JSON: {exc}")
@@ -124,6 +159,7 @@ else:
     if st.button("Use the default rubric", type="primary"):
         st.session_state["draft_rubric"] = None
         st.session_state["draft_raw_text"] = None
+        st.session_state["pending_solution"] = None
         st.session_state["use_default_points"] = default_points
 
 # ---------------------------------------------------------------------
@@ -200,10 +236,22 @@ with st.form("new_assignment"):
 
         if created:
             st.session_state["active_assignment"] = created["id"]
+
+            # If the rubric was built from an uploaded solution, attach that
+            # same file as the grading reference so the grader can use it.
+            pending = st.session_state.pop("pending_solution", None)
+            if pending:
+                with st.spinner("Attaching your solution as the grading reference..."):
+                    attached = api_client.upload_solution_bytes(
+                        created["id"], pending["name"], pending["bytes"]
+                    )
+                if attached:
+                    st.caption("Your solution is attached as the grading reference.")
+
             st.session_state["draft_rubric"] = None
             st.success(
                 f"Created **{created['name']}** "
                 f"({created['total_possible_points']:g} points)."
             )
             page_link("pages/upload_grade.py",
-                         label="Next: upload submissions", icon="📤")
+                         label="Next: upload submissions", icon=":material/upload_file:")

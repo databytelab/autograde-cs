@@ -19,10 +19,10 @@ from frontend_streamlit.components.ui import (
     stats_row,
 )
 
-page_setup("Dashboard", "📊")
+page_setup("Dashboard")
 require_auth()
 
-st.title("📊 Dashboard")
+st.title("Dashboard")
 
 courses = api_client.list_courses()
 if courses is None:
@@ -31,7 +31,7 @@ if courses is None:
 if not courses:
     st.info("You have no courses yet.")
     page_link("pages/new_assignment.py", label="Create your first course",
-                 icon="📝")
+                 icon=":material/note_add:")
     st.stop()
 
 assignments = api_client.list_assignments() or []
@@ -107,8 +107,8 @@ for course in courses:
 
         links = st.columns(3)
         with links[0]:
-            page_link("pages/upload_grade.py", label="Upload & grade", icon="📤")
+            page_link("pages/upload_grade.py", label="Upload & grade", icon=":material/upload_file:")
         with links[1]:
-            page_link("pages/review_results.py", label="Review results", icon="🔍")
+            page_link("pages/review_results.py", label="Review results", icon=":material/fact_check:")
         with links[2]:
-            page_link("pages/export.py", label="Export", icon="📦")
+            page_link("pages/export.py", label="Export", icon=":material/download:")

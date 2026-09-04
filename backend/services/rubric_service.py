@@ -238,6 +238,70 @@ def parse_rubric_text(text: str, total_points: float | None = None) -> dict[str,
     return validate_rubric(extracted)
 
 
+def _scale_criteria_to_total(rubric: dict[str, Any], target: float) -> dict[str, Any]:
+    """
+    Rescale a rubric's criterion points to sum to exactly `target`.
+
+    Models are unreliable at exact arithmetic - asked for 100 points they may
+    return criteria summing to 120. We keep the model's *relative* weighting
+    but make the totals land on the number the professor asked for, using the
+    largest-remainder method so the points stay whole and sum exactly.
+    """
+    criteria = list(rubric.get("criteria") or [])
+    current = sum(float(c.get("max_points", 0) or 0) for c in criteria)
+    target_int = int(round(target))
+    if not criteria or current <= 0 or target_int <= 0 or abs(current - target) < 0.5:
+        return rubric
+
+    factor = target_int / current
+    exact = [float(c.get("max_points", 0) or 0) * factor for c in criteria]
+    points = [max(1, int(x)) for x in exact]           # floor, at least 1 each
+
+    # Hand out (or claw back) the leftover to the largest fractional parts.
+    drift = target_int - sum(points)
+    order = sorted(range(len(criteria)), key=lambda i: exact[i] - int(exact[i]),
+                   reverse=(drift > 0))
+    step = 1 if drift > 0 else -1
+    i = 0
+    while drift != 0 and order:
+        idx = order[i % len(order)]
+        if step < 0 and points[idx] <= 1:   # never take a criterion below 1
+            i += 1
+            if i > len(order) * 3:
+                break
+            continue
+        points[idx] += step
+        drift -= step
+        i += 1
+
+    scaled = [dict(c, max_points=p) for c, p in zip(criteria, points)]
+    out = dict(rubric)
+    out["criteria"] = scaled
+    out["total_points"] = float(sum(points))
+    return out
+
+
+def build_rubric_from_solution(
+    parsed: dict[str, Any],
+    total_points: float | None = None,
+) -> dict[str, Any]:
+    """
+    Turn a parsed instructor solution into a validated rubric.
+
+    The model reads the worked solution and derives criteria that judge the
+    underlying work rather than an exact match, since student code and output
+    legitimately vary. When a total is requested, the criterion points are
+    rescaled to sum to it exactly. The AI call is imported lazily so importing
+    this module never requires an API key.
+    """
+    from backend.ai.grader import extract_rubric_from_solution  # local import
+
+    extracted = extract_rubric_from_solution(parsed, total_points=total_points)
+    if total_points:
+        extracted = _scale_criteria_to_total(extracted, total_points)
+    return validate_rubric(extracted)
+
+
 def build_default_rubric(total_points: float = 100.0) -> dict[str, Any]:
     """
     A generic CS-assignment rubric, used when a professor uploads

@@ -204,3 +204,34 @@ def test_ai_extracted_rubric_is_still_validated(mock_claude):
                  "grading_notes": ""})
     with pytest.raises(RubricError, match="missing a 'name'"):
         parse_rubric_text("Some prose that will produce a bad rubric.")
+
+
+# ---------------------------------------------------------------------
+# Rescaling a solution-derived rubric to the requested total
+# ---------------------------------------------------------------------
+def test_scale_criteria_to_total_hits_the_target_exactly():
+    from backend.services.rubric_service import _scale_criteria_to_total
+
+    rubric = {"criteria": [
+        {"id": "a", "name": "A", "max_points": 20},
+        {"id": "b", "name": "B", "max_points": 25},
+        {"id": "c", "name": "C", "max_points": 25},
+        {"id": "d", "name": "D", "max_points": 10},
+        {"id": "e", "name": "E", "max_points": 25},
+        {"id": "f", "name": "F", "max_points": 15},
+    ]}  # sums to 120
+    scaled = _scale_criteria_to_total(rubric, 100)
+    points = [c["max_points"] for c in scaled["criteria"]]
+    assert sum(points) == 100
+    assert all(p >= 1 for p in points)
+    # The smallest criterion (D) stays the smallest after scaling.
+    assert scaled["criteria"][3]["max_points"] == min(points)
+
+
+def test_scale_criteria_leaves_a_matching_total_alone():
+    from backend.services.rubric_service import _scale_criteria_to_total
+
+    rubric = {"criteria": [{"id": "a", "name": "A", "max_points": 60},
+                           {"id": "b", "name": "B", "max_points": 40}]}
+    scaled = _scale_criteria_to_total(rubric, 100)
+    assert [c["max_points"] for c in scaled["criteria"]] == [60, 40]

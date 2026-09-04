@@ -21,10 +21,10 @@ from frontend_streamlit.components.ui import (
     require_auth,
 )
 
-page_setup("Upload & grade", "📤")
+page_setup("Upload & grade")
 require_auth()
 
-st.title("📤 Upload & grade")
+st.title("Upload & grade")
 
 course = course_selector()
 if course is None:
@@ -32,7 +32,7 @@ if course is None:
 
 assignment = assignment_selector(course["id"])
 if assignment is None:
-    page_link("pages/new_assignment.py", label="Create an assignment", icon="📝")
+    page_link("pages/new_assignment.py", label="Create an assignment", icon=":material/note_add:")
     st.stop()
 
 health = api_client.health() or {}
@@ -79,7 +79,8 @@ with st.expander("Instructor reference solution (optional, improves accuracy)"):
             st.rerun()
 
 if assignment.get("expected_submission_path"):
-    st.caption("✅ A reference solution is attached to this assignment.")
+    st.success("A reference solution is attached to this assignment.",
+               icon=":material/check_circle:")
 
 # ---------------------------------------------------------------------
 # Current submissions
@@ -173,7 +174,7 @@ else:
 
     if st.button(f"Grade {target_count} submission(s)", type="primary",
                  disabled=target_count == 0):
-        with st.spinner("Grading. This runs one Claude call per submission..."):
+        with st.spinner("Grading. This runs one model call per submission..."):
             outcome = api_client.grade(
                 assignment["id"], regrade=regrade, include_images=include_images
             )
@@ -195,12 +196,12 @@ else:
                     )
                 elif not result["ok"]:
                     st.markdown(
-                        f"- ❌ **{result['student_name'] or '(unknown)'}** — "
+                        f"- **{result['student_name'] or '(unknown)'}** — "
                         f"{result['error']}"
                     )
 
             page_link("pages/review_results.py",
-                         label="Next: review the results", icon="🔍")
+                         label="Next: review the results", icon=":material/fact_check:")
 
 # ---------------------------------------------------------------------
 # Similarity
@@ -227,4 +228,4 @@ if st.button("Run similarity scan"):
         else:
             st.warning(f"{len(flags)} pair(s) flagged for review.")
             page_link("pages/review_results.py",
-                         label="Review the flags", icon="🔍")
+                         label="Review the flags", icon=":material/fact_check:")

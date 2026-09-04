@@ -16,7 +16,8 @@ if "sqlite" in settings.database_url:
 engine = create_engine(
     settings.database_url,
     connect_args=connect_args,
-    echo=(settings.environment == "development"),  # log SQL in dev
+    echo=settings.sql_echo,          # off by default; SQL echo is a heavy I/O cost
+    pool_pre_ping=True,              # drop dead connections instead of erroring
 )
 
 # Enable WAL mode for SQLite — better concurrent read performance

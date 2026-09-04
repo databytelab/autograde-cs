@@ -18,10 +18,10 @@ from frontend_streamlit.components.ui import (
     stats_row,
 )
 
-page_setup("Export", "📦")
+page_setup("Export")
 require_auth()
 
-st.title("📦 Export")
+st.title("Export")
 
 course = course_selector()
 if course is None:
@@ -55,19 +55,19 @@ only_finalized = st.checkbox(
 )
 
 FORMATS = [
-    ("csv", "CSV", "Generic gradebook import - one row per student.", "📄"),
+    ("csv", "CSV", "Generic gradebook import - one row per student."),
     ("xlsx", "Excel", "Two sheets: grades, plus a per-criterion breakdown "
-                      "with the AI score, your override, and the reasoning.", "📊"),
+                      "with the AI score, your override, and the reasoning."),
     ("pdf", "PDF feedback", "One feedback sheet per student, ready to hand "
-                            "back.", "📕"),
+                            "back."),
     ("canvas_csv", "Canvas CSV", "The column layout the Canvas gradebook "
-                                 "importer expects.", "🎓"),
+                                 "importer expects."),
 ]
 
 columns = st.columns(len(FORMATS))
-for column, (fmt, label, blurb, icon) in zip(columns, FORMATS):
+for column, (fmt, label, blurb) in zip(columns, FORMATS):
     with column:
-        st.markdown(f"### {icon} {label}")
+        st.markdown(f"### {label}")
         st.caption(blurb)
         if st.button(f"Build {label}", key=f"build_{fmt}",
                      use_container_width=True):

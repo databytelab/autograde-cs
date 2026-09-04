@@ -218,3 +218,75 @@ def test_extract_structure_signature_variants():
     signatures = {f["name"]: f["signature"] for f in structure["functions"]}
     assert signatures["f"] == "f(a, b=1, *args, c, d=2, **kwargs)"
     assert signatures["g"] == "g(x)"
+
+
+# ---------------------------------------------------------------------
+# Student identity read from inside a submission
+# ---------------------------------------------------------------------
+def test_extract_identity_from_content_finds_name_and_id():
+    from backend.utils.file_utils import extract_identity_from_parsed
+
+    parsed = {"cells": [
+        {"cell_type": "markdown",
+         "source": "# Lab 2 - Decision Trees\nName: Jane Doe\nStudent ID: A1234567\n"},
+        {"cell_type": "code", "source": "import pandas as pd"},
+    ]}
+    name, sid = extract_identity_from_parsed(parsed)
+    assert name == "Jane Doe"
+    assert sid == "A1234567"
+
+
+def test_extract_identity_returns_none_when_absent():
+    from backend.utils.file_utils import extract_identity_from_parsed
+
+    parsed = {"cells": [{"cell_type": "code", "source": "x = 1  # no name here"}]}
+    assert extract_identity_from_parsed(parsed) == (None, None)
+
+
+def test_extract_identity_ignores_prose_mentions_of_name():
+    from backend.utils.file_utils import extract_identity_from_parsed
+
+    parsed = {"cells": [
+        {"cell_type": "markdown",
+         "source": "Choose a good name for your function and explain the method."},
+    ]}
+    # "name" appears but only as prose (no "Name: <value>" label).
+    assert extract_identity_from_parsed(parsed)[0] is None
+
+
+# ---------------------------------------------------------------------
+# SVG / vector figures are counted (graphviz trees, plotly, ...)
+# ---------------------------------------------------------------------
+def test_html_counts_svg_figures(tmp_path):
+    from backend.parsers import parse_submission
+
+    html = """<html><body>
+      <div class="jp-Cell jp-CodeCell">
+        <div class="jp-InputArea-editor">import graphviz; draw_tree()</div>
+        <div class="jp-OutputArea-output">Creating tree visualization... done</div>
+        <div class="jp-OutputArea-output"><svg width="20" height="20"><g/></svg></div>
+      </div>
+    </body></html>"""
+    f = tmp_path / "sol.html"
+    f.write_text(html, encoding="utf-8")
+
+    parsed = parse_submission(str(f))
+    assert parsed["stats"]["n_figures"] >= 1        # the SVG is a figure
+    assert parsed["cells"][0]["n_figures"] >= 1
+
+
+def test_html_without_a_figure_reports_zero(tmp_path):
+    from backend.parsers import parse_submission
+
+    html = """<html><body>
+      <div class="jp-Cell jp-CodeCell">
+        <div class="jp-InputArea-editor">print("Tree visualization completed!")</div>
+        <div class="jp-OutputArea-output">Tree visualization completed!</div>
+      </div>
+    </body></html>"""
+    f = tmp_path / "sub.html"
+    f.write_text(html, encoding="utf-8")
+
+    parsed = parse_submission(str(f))
+    assert parsed["stats"]["n_figures"] == 0
+    assert parsed["cells"][0]["n_figures"] == 0

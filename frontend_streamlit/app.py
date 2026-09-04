@@ -29,8 +29,13 @@ from frontend_streamlit.components.ui import (
 
 page_setup("Home")
 
-st.title("🎓 AutoGrade CS")
-st.caption("AI-assisted grading for CS assignments - you stay in control of every grade.")
+st.title("AutoGrade CS")
+st.markdown(
+    "<p style='font-size:1.15rem; line-height:1.55; color:#6b675f; "
+    "margin:-2px 0 14px 0;'>AI-assisted grading for CS assignments "
+    "&mdash; you stay in control of every grade.</p>",
+    unsafe_allow_html=True,
+)
 
 
 # ---------------------------------------------------------------------
@@ -56,19 +61,19 @@ if st.session_state.get("token"):
     st.subheader("Where to start")
     columns = st.columns(5)
     with columns[0]:
-        page_link("pages/dashboard.py", label="Dashboard", icon="📊")
+        page_link("pages/dashboard.py", label="Dashboard", icon=":material/space_dashboard:")
         st.caption("See every course and how grading is going.")
     with columns[1]:
-        page_link("pages/new_assignment.py", label="New assignment", icon="📝")
+        page_link("pages/new_assignment.py", label="New assignment", icon=":material/note_add:")
         st.caption("Create a course or assignment and write its rubric.")
     with columns[2]:
-        page_link("pages/upload_grade.py", label="Upload & grade", icon="📤")
+        page_link("pages/upload_grade.py", label="Upload & grade", icon=":material/upload_file:")
         st.caption("Upload student files and run the grader.")
     with columns[3]:
-        page_link("pages/review_results.py", label="Review results", icon="🔍")
+        page_link("pages/review_results.py", label="Review results", icon=":material/fact_check:")
         st.caption("Read the feedback, adjust scores, approve grades.")
     with columns[4]:
-        page_link("pages/export.py", label="Export", icon="📦")
+        page_link("pages/export.py", label="Export", icon=":material/download:")
         st.caption("Download CSV, Excel, PDF, or push to Canvas.")
 
     st.divider()
@@ -77,7 +82,7 @@ if st.session_state.get("token"):
             """
             1. **Parse** - your students' `.ipynb`, `.html` and `.py` files are
                broken into cells, code, prose, outputs and figures.
-            2. **Grade** - each submission goes to Claude once, together with
+            2. **Grade** - each submission goes to the model once, together with
                your rubric. The model scores every criterion and writes
                feedback and its reasoning.
             3. **Verify** - AutoGrade recomputes every total itself, clamps any

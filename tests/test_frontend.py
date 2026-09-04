@@ -353,12 +353,13 @@ def test_export_page_flags_unapproved_grades(fake_backend):
 # ---------------------------------------------------------------------
 # New assignment
 # ---------------------------------------------------------------------
-def test_new_assignment_offers_all_three_rubric_routes(fake_backend):
+def test_new_assignment_offers_all_rubric_routes(fake_backend):
     fake_backend()
     app = run_page(PAGES["new_assignment"])
     assert not app.exception
     options = app.radio[0].options
-    assert len(options) == 3
+    assert len(options) == 4
     assert any("Describe" in o for o in options)
+    assert any("solution file" in o for o in options)
     assert any("JSON" in o for o in options)
     assert any("default" in o for o in options)

@@ -61,10 +61,23 @@ FLAG_LABELS = {
 }
 
 
-def page_setup(title: str, icon: str = "🎓") -> None:
+# A small, font-size-only bump: Streamlit's default body text reads a touch
+# small. Nothing else here - no colours, layout, or navigation.
+_TEXT_CSS = """
+<style>
+.stApp p, .stApp li, .stApp label,
+[data-testid="stMarkdownContainer"] p { font-size: 16.5px; line-height: 1.55; }
+[data-testid="stCaptionContainer"] p, [data-testid="stCaptionContainer"] {
+  font-size: 0.95rem !important;
+}
+</style>
+"""
+
+
+def page_setup(title: str, icon: str | None = None) -> None:
     """Standard page config. Call once, first, on every page."""
-    st.set_page_config(page_title=f"{title} - AutoGrade CS",
-                       page_icon=icon, layout="wide")
+    st.set_page_config(page_title=f"{title} - AutoGrade CS", layout="wide")
+    st.markdown(_TEXT_CSS, unsafe_allow_html=True)
 
 
 def require_auth() -> dict[str, Any]:
@@ -77,7 +90,7 @@ def require_auth() -> dict[str, Any]:
     if not st.session_state.get("token"):
         st.warning("Please sign in on the **Home** page first.")
         try:
-            st.page_link("app.py", label="Go to sign in", icon="🔑")
+            st.page_link("app.py", label="Go to sign in", icon=":material/login:")
         except Exception:  # noqa: BLE001 - see _workflow_links
             pass
         st.stop()
@@ -88,12 +101,12 @@ def require_auth() -> dict[str, Any]:
 
 
 WORKFLOW = [
-    ("app.py", "Home", "🏠"),
-    ("pages/dashboard.py", "1 · Dashboard", "📊"),
-    ("pages/new_assignment.py", "2 · New assignment", "📝"),
-    ("pages/upload_grade.py", "3 · Upload & grade", "📤"),
-    ("pages/review_results.py", "4 · Review results", "🔍"),
-    ("pages/export.py", "5 · Export", "📦"),
+    ("app.py", "Home", ":material/home:"),
+    ("pages/dashboard.py", "1 · Dashboard", ":material/space_dashboard:"),
+    ("pages/new_assignment.py", "2 · New assignment", ":material/note_add:"),
+    ("pages/upload_grade.py", "3 · Upload & grade", ":material/upload_file:"),
+    ("pages/review_results.py", "4 · Review results", ":material/fact_check:"),
+    ("pages/export.py", "5 · Export", ":material/download:"),
 ]
 
 
@@ -130,13 +143,15 @@ def render_sidebar(user: dict[str, Any]) -> None:
         _workflow_links()
 
         st.divider()
+        # Backend status: is the API reachable, and is grading configured?
         status = api_client.health()
         if status is None:
-            st.error("Backend offline")
+            st.error("Backend offline - start the API server")
         elif not grading_ready(status):
-            st.warning(f"Grading disabled - set {grading_key_hint(status)}")
+            st.warning(f"Grading off - set {grading_key_hint(status)}")
         else:
-            st.success("Backend ready")
+            provider = status.get("llm_provider", "AI")
+            st.success(f"Grading ready · {provider}")
 
         if st.button("Sign out", use_container_width=True):
             api_client.logout()

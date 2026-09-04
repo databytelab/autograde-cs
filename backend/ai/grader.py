@@ -228,7 +228,9 @@ def grade_submission(
 
     result = normalize_grade(ai_output, rubric)
 
-    # Deterministic checks the model should not be trusted to make.
+    # Deterministic checks the model should not be trusted to make. These are
+    # the only automatic flags - both are genuine "look at this" signals:
+    # a notebook that was never run, and a recorded runtime error.
     stats = parsed.get("stats") or {}
     if stats.get("n_code_cells") and not stats.get("has_outputs"):
         if "no_outputs" not in result["flags"]:
@@ -254,6 +256,28 @@ def extract_rubric_from_text(
     ai_output, _usage = get_provider().complete_json(
         system=prompts.RUBRIC_EXTRACTION_SYSTEM,
         user_prompt=prompts.build_rubric_extraction_prompt(text, total_points),
+        schema=prompts.RUBRIC_RESPONSE_SCHEMA,
+        effort="medium",
+        purpose="rubric",
+    )
+    return ai_output
+
+
+def extract_rubric_from_solution(
+    parsed: dict[str, Any],
+    total_points: float | None = None,
+) -> dict[str, Any]:
+    """
+    Ask the model to build a rubric from an instructor's *worked solution*.
+
+    Reads the parsed solution (code, prose, outputs) and derives grading
+    criteria that judge the underlying work rather than an exact code/output
+    match - students implement differently and their output legitimately
+    varies. Returns the RAW extracted dict; the caller validates it.
+    """
+    ai_output, _usage = get_provider().complete_json(
+        system=prompts.RUBRIC_FROM_SOLUTION_SYSTEM,
+        user_prompt=prompts.build_rubric_from_solution_prompt(parsed, total_points),
         schema=prompts.RUBRIC_RESPONSE_SCHEMA,
         effort="medium",
         purpose="rubric",

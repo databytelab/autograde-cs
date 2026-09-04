@@ -104,6 +104,54 @@ def guess_student_name(filename: str) -> str | None:
     return name or None
 
 
+# A student who writes "Name: Jane Doe" / "Student ID: 12345" in a header
+# cell is common; read that when the filename tells us nothing.
+_NAME_LABEL = re.compile(
+    r"\b(?:student\s*name|full\s*name|name|author|submitted\s*by)\b"
+    r"\s*[:=\-]\s*([A-Za-z][A-Za-z .'\-]{1,50})",
+    re.I,
+)
+_ID_LABEL = re.compile(
+    r"\b(?:student\s*id|student\s*number|matric(?:ulation)?(?:\s*(?:no|number|id))?|"
+    r"roll\s*(?:no|number)|registration\s*(?:no|number)|id\s*(?:no|number))\b"
+    r"\s*[:#=\-]?\s*([A-Za-z]?\d[A-Za-z0-9\-]{2,19})",
+    re.I,
+)
+
+
+def extract_identity_from_parsed(parsed: dict) -> tuple[str | None, str | None]:
+    """
+    Best-effort student name and id read from a submission's own text.
+
+    Scans the first several cells (headers/markdown are where students put
+    their details) for "Name: ..." and "Student ID: ..." style labels. Returns
+    (name, student_id); either may be None. Never raises - identity detection
+    must not be able to fail an upload.
+    """
+    chunks: list[str] = []
+    for cell in (parsed.get("cells") or [])[:10]:
+        source = (cell.get("source") or "").strip()
+        if source:
+            chunks.append(source)
+    text = "\n".join(chunks)[:5000]
+
+    name = None
+    match = _NAME_LABEL.search(text)
+    if match:
+        candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .-'")
+        if len(candidate) >= 2 and candidate.lower() not in (
+            "name", "student", "here", "the", "your"
+        ):
+            name = candidate
+
+    student_id = None
+    match = _ID_LABEL.search(text)
+    if match:
+        student_id = match.group(1).strip()
+
+    return name, student_id
+
+
 def save_upload(
     source: BinaryIO,
     original_filename: str,

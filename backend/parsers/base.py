@@ -35,6 +35,10 @@ class ParsedCell(TypedDict):
     outputs: list[str]      # text/plain and stream output, already flattened
     execution_count: int | None
     has_error: bool
+    # How many figures this cell actually rendered - PNG *and* SVG (graphviz,
+    # plotly, ...). A cell whose code claims to plot but whose n_figures is 0
+    # produced no figure, however confident its printed text sounds.
+    n_figures: int
 
 
 class ParsedImage(TypedDict):
@@ -78,12 +82,16 @@ def finalize(result: dict[str, Any]) -> dict[str, Any]:
     result["markdown"] = "\n\n".join(p for p in md_parts if p.strip())
 
     n_outputs = sum(len(c["outputs"]) for c in result["cells"])
+    # Total figures counts SVG too; n_images counts only the base64 raster
+    # images we can actually send to the vision model.
+    n_figures = sum(c.get("n_figures", 0) for c in result["cells"])
     result["stats"] = {
         "n_cells": len(result["cells"]),
         "n_code_cells": sum(1 for c in result["cells"] if c["cell_type"] == "code"),
         "n_markdown_cells": sum(1 for c in result["cells"] if c["cell_type"] == "markdown"),
         "n_outputs": n_outputs,
         "n_images": len(result["images"]),
+        "n_figures": max(n_figures, len(result["images"])),
         "n_errors": len(result["errors"]),
         # A notebook with code but zero outputs was almost certainly never run.
         "has_outputs": n_outputs > 0,

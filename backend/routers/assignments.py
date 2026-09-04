@@ -7,6 +7,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Response,
     UploadFile,
@@ -18,6 +19,7 @@ from backend.database import get_db
 from backend.models.assignment import Assignment
 from backend.models.course import Course
 from backend.models.user import User
+from backend.parsers import ParseError, parse_submission
 from backend.routers.deps import get_owned_assignment, get_owned_course
 from backend.schemas.assignment import (
     AssignmentCreate,
@@ -28,6 +30,7 @@ from backend.schemas.assignment import (
 from backend.services.rubric_service import (
     RubricError,
     build_default_rubric,
+    build_rubric_from_solution,
     parse_rubric_text,
     validate_rubric,
 )
@@ -36,6 +39,7 @@ from backend.utils.file_utils import (
     FileTooLargeError,
     UnsupportedFileError,
     delete_assignment_files,
+    delete_file,
     save_upload,
 )
 
@@ -205,6 +209,58 @@ def preview_rubric(payload: RubricPreviewRequest,
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
+
+
+@router.post("/rubric/from-solution", tags=["rubrics"])
+def rubric_from_solution(
+    file: UploadFile = File(...),
+    total_points: float = Form(100.0),
+    _user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Build a rubric from an uploaded instructor solution (.ipynb / .html / .py).
+
+    The file is parsed and read by the model, which derives grading criteria
+    that judge the underlying work rather than an exact match - student code
+    and output legitimately vary. Nothing is saved: the professor reviews the
+    result, then creates the assignment with it (and can attach the same file
+    as the reference solution for grading).
+    """
+    try:
+        path, _size, _ftype = save_upload(
+            file.file, file.filename or "solution", "_rubric_preview"
+        )
+    except UnsupportedFileError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)
+        ) from exc
+    except FileTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
+
+    try:
+        parsed = parse_submission(path)
+        rubric = build_rubric_from_solution(parsed, total_points=total_points)
+    except ParseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not read the solution file: {exc}",
+        ) from exc
+    except RubricError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except RuntimeError as exc:
+        # A GradingError from the extraction call - almost always a missing
+        # or rejected API key.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    finally:
+        delete_file(path)
+
+    return rubric
 
 
 @router.get("/{assignment_id}/rubric", tags=["rubrics"])

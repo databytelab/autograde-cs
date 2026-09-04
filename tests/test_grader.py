@@ -360,3 +360,24 @@ def test_extract_rubric_from_text_uses_the_rubric_schema(mock_claude):
     schema = fake.calls[0]["output_config"]["format"]["schema"]
     assert schema is prompts.RUBRIC_RESPONSE_SCHEMA
     assert fake.calls[0]["output_config"]["effort"] == "medium"
+
+
+def test_extract_rubric_from_solution_reads_the_solution(mock_claude, parsed):
+    """Builds a rubric from a parsed solution, using the rubric schema."""
+    from backend.ai.grader import extract_rubric_from_solution
+
+    fake = mock_claude({
+        "title": "From solution", "total_points": 100,
+        "criteria": [{"id": "c1", "name": "C1", "description": "d",
+                      "max_points": 100, "keywords": [], "requires_output": False}],
+        "grading_notes": "",
+    })
+    extract_rubric_from_solution(parsed, total_points=100)
+
+    call = fake.calls[0]
+    assert call["output_config"]["format"]["schema"] is prompts.RUBRIC_RESPONSE_SCHEMA
+    assert call["output_config"]["effort"] == "medium"
+    # The solution's system prompt tells the model output/code will vary.
+    assert call["system"][0]["text"] == prompts.RUBRIC_FROM_SOLUTION_SYSTEM
+    prompt = next(b["text"] for b in call["messages"][0]["content"] if b["type"] == "text")
+    assert "worked solution" in prompt.lower()

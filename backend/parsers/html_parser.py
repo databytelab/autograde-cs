@@ -37,12 +37,22 @@ def _clean(text: str | None) -> str:
     return _PROMPT.sub("", text).strip()
 
 
-def _collect_images(scope, cell_index: int, images: list) -> None:
-    """Pull base64 <img> payloads out of a cell's output area."""
+def _collect_figures(scope, cell_index: int, images: list) -> int:
+    """
+    Pull base64 <img> payloads out of a cell's output area and count every
+    figure it rendered - raster (PNG/JPEG) *and* vector (<svg>, e.g. a
+    graphviz decision tree or a plotly chart).
+
+    Returns the number of figures found. The SVG ones cannot be sent to the
+    vision model, but their presence (or absence) is what lets the grader tell
+    that a plot a student claimed to draw is actually missing.
+    """
+    n_figures = 0
     for img in scope.find_all("img"):
         match = _DATA_URI.match(img.get("src", "") or "")
         if not match:
             continue
+        n_figures += 1
         payload = match.group("data").replace("\n", "").strip()
         if len(payload) * 3 // 4 <= MAX_IMAGE_BYTES:
             images.append({
@@ -50,6 +60,8 @@ def _collect_images(scope, cell_index: int, images: list) -> None:
                 "media_type": match.group("mime").lower(),
                 "data_b64": payload,
             })
+    n_figures += len(scope.find_all("svg"))
+    return n_figures
 
 
 def _parse_jupyterlab(soup: BeautifulSoup, result: dict) -> bool:
@@ -66,7 +78,7 @@ def _parse_jupyterlab(soup: BeautifulSoup, result: dict) -> bool:
         source_node = cell.select_one(".jp-InputArea-editor, .jp-RenderedMarkdown")
         source = _clean(source_node.get_text("\n") if source_node else "")
 
-        outputs, has_error = [], False
+        outputs, has_error, n_figures = [], False, 0
         for out in cell.select(".jp-OutputArea-output"):
             if "jp-RenderedText" in out.get("class", []) and out.select_one(".ansi-red-fg"):
                 has_error = True
@@ -74,11 +86,12 @@ def _parse_jupyterlab(soup: BeautifulSoup, result: dict) -> bool:
             text = _clean(out.get_text("\n"))
             if text:
                 outputs.append(text)
-            _collect_images(out, index, result["images"])
+            n_figures += _collect_figures(out, index, result["images"])
 
         result["cells"].append({
             "index": index, "cell_type": cell_type, "source": source,
             "outputs": outputs, "execution_count": None, "has_error": has_error,
+            "n_figures": n_figures,
         })
     return True
 
@@ -95,18 +108,19 @@ def _parse_classic(soup: BeautifulSoup, result: dict) -> bool:
         source_node = input_area or cell.select_one(".text_cell_render, .rendered_html")
         source = _clean(source_node.get_text("\n") if source_node else "")
 
-        outputs, has_error = [], False
+        outputs, has_error, n_figures = [], False, 0
         for out in cell.select(".output_area, .output_subarea"):
             if out.select_one(".output_stderr") or "ename" in out.get_text():
                 has_error = True
             text = _clean(out.get_text("\n"))
             if text:
                 outputs.append(text)
-            _collect_images(out, index, result["images"])
+            n_figures += _collect_figures(out, index, result["images"])
 
         result["cells"].append({
             "index": index, "cell_type": cell_type, "source": source,
             "outputs": outputs, "execution_count": None, "has_error": has_error,
+            "n_figures": n_figures,
         })
     return True
 
@@ -127,6 +141,7 @@ def _parse_generic(soup: BeautifulSoup, result: dict) -> None:
         result["cells"].append({
             "index": index, "cell_type": "code", "source": source,
             "outputs": [], "execution_count": None, "has_error": False,
+            "n_figures": 0,
         })
         index += 1
 
@@ -139,9 +154,10 @@ def _parse_generic(soup: BeautifulSoup, result: dict) -> None:
         result["cells"].append({
             "index": index, "cell_type": "markdown", "source": prose,
             "outputs": [], "execution_count": None, "has_error": False,
+            "n_figures": 0,
         })
 
-    _collect_images(soup, 0, result["images"])
+    _collect_figures(soup, 0, result["images"])
 
 
 def parse(file_path: str | Path) -> dict[str, Any]:

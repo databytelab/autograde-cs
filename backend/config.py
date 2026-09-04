@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # ── App ───────────────────────────────────────────────────
     environment: str = "development"
     app_name: str = "AutoGrade CS"
+    # Echo every SQL statement to the log. Off by default: it is a heavy
+    # per-query I/O cost and floods the log. Turn on only to debug queries.
+    sql_echo: bool = False
 
     # ── Canvas LMS (populated in Stage 11) ───────────────────
     canvas_base_url: str = ""

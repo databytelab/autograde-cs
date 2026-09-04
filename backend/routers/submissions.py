@@ -19,6 +19,7 @@ from backend.models.assignment import Assignment
 from backend.models.similarity_flag import SimilarityFlag
 from backend.models.submission import Submission
 from backend.models.user import User
+from backend.parsers import parse_submission
 from backend.routers.deps import get_owned_assignment, get_owned_submission
 from backend.schemas.submission import (
     GradeRequest,
@@ -38,6 +39,7 @@ from backend.utils.file_utils import (
     FileTooLargeError,
     UnsupportedFileError,
     delete_file,
+    extract_identity_from_parsed,
     guess_student_name,
     save_upload,
 )
@@ -88,10 +90,24 @@ def upload_submissions(
             ))
             continue
 
+        # Identity comes from the filename first (fast, no parse). When the
+        # filename tells us nothing, read the student's name/id from inside
+        # the file. Either source can leave it blank - the professor can
+        # correct it in the UI.
         student_name = guess_student_name(filename)
+        student_id = None
+        if not student_name:
+            try:
+                student_name, student_id = extract_identity_from_parsed(
+                    parse_submission(path)
+                )
+            except Exception:  # noqa: BLE001 - identity detection never fails an upload
+                pass
+
         submission = Submission(
             assignment_id=assignment.id,
             student_name=student_name,
+            student_id_external=student_id,
             original_filename=filename,
             file_path=str(path),
             file_type=file_type,

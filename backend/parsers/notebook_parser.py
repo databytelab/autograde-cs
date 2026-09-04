@@ -34,14 +34,21 @@ def _source_to_str(source: Any) -> str:
     return source or ""
 
 
-def _flatten_outputs(outputs: list, cell_index: int, images: list) -> tuple[list[str], list[str]]:
+def _flatten_outputs(
+    outputs: list, cell_index: int, images: list
+) -> tuple[list[str], list[str], int]:
     """
-    Turn a cell's outputs into (text_outputs, error_tracebacks).
-    Images are appended to the shared `images` list as a side effect
-    because they belong to the document, not to the cell text.
+    Turn a cell's outputs into (text_outputs, error_tracebacks, n_figures).
+
+    Raster images are appended to the shared `images` list because they belong
+    to the document, not to the cell text. `n_figures` counts every figure the
+    cell rendered - raster *and* vector (image/svg+xml, e.g. a graphviz tree or
+    a plotly chart) - so the grader can tell a claimed-but-missing plot from a
+    real one, even when the SVG itself can't be sent to the vision model.
     """
     texts: list[str] = []
     errors: list[str] = []
+    n_figures = 0
 
     for out in outputs:
         out_type = out.get("output_type")
@@ -60,19 +67,25 @@ def _flatten_outputs(outputs: list, cell_index: int, images: list) -> tuple[list
                 if mime in data:
                     texts.append(_source_to_str(data[mime]))
                     break
-            for mime in _IMAGE_MIMES:
-                if mime in data:
-                    payload = _source_to_str(data[mime]).replace("\n", "")
-                    # base64 inflates by 4/3 — compare against the decoded size
-                    if len(payload) * 3 // 4 <= MAX_IMAGE_BYTES:
-                        images.append({
-                            "cell_index": cell_index,
-                            "media_type": mime,
-                            "data_b64": payload,
-                        })
-                    break
 
-    return texts, errors
+            raster = next((m for m in _IMAGE_MIMES if m in data), None)
+            has_svg = "image/svg+xml" in data or (
+                "text/html" in data
+                and "<svg" in _source_to_str(data["text/html"]).lower()
+            )
+            if raster or has_svg:
+                n_figures += 1
+            if raster:
+                payload = _source_to_str(data[raster]).replace("\n", "")
+                # base64 inflates by 4/3 — compare against the decoded size
+                if len(payload) * 3 // 4 <= MAX_IMAGE_BYTES:
+                    images.append({
+                        "cell_index": cell_index,
+                        "media_type": raster,
+                        "data_b64": payload,
+                    })
+
+    return texts, errors, n_figures
 
 
 def parse(file_path: str | Path) -> dict[str, Any]:
@@ -99,10 +112,10 @@ def parse(file_path: str | Path) -> dict[str, Any]:
 
     for index, cell in enumerate(nb.get("cells", [])):
         cell_type = cell.get("cell_type", "raw")
-        outputs, errors = [], []
+        outputs, errors, n_figures = [], [], 0
 
         if cell_type == "code":
-            outputs, errors = _flatten_outputs(
+            outputs, errors, n_figures = _flatten_outputs(
                 cell.get("outputs", []), index, result["images"]
             )
             result["errors"].extend(errors)
@@ -114,6 +127,7 @@ def parse(file_path: str | Path) -> dict[str, Any]:
             "outputs": [t for t in outputs if t.strip()],
             "execution_count": cell.get("execution_count"),
             "has_error": bool(errors),
+            "n_figures": n_figures,
         })
 
     # An unexecuted notebook has execution_count None on every code cell.

@@ -253,6 +253,41 @@ def test_grading_without_an_api_key_returns_503(client, professor, course):
     assert "ANTHROPIC_API_KEY" in response.json()["detail"]
 
 
+def test_rubric_from_solution_builds_a_rubric(client, professor, mock_claude):
+    mock_claude({
+        "title": "From solution", "total_points": 100, "grading_notes": "",
+        "criteria": [
+            {"id": "load", "name": "Load data",
+             "description": "Reads the dataset.", "max_points": 40,
+             "keywords": ["read_csv"], "requires_output": True},
+            {"id": "model", "name": "Model",
+             "description": "Trains the model.", "max_points": 60,
+             "keywords": [], "requires_output": False},
+        ],
+    })
+    data = (SAMPLES / "good_submission.ipynb").read_bytes()
+    response = client.post(
+        "/api/assignments/rubric/from-solution",
+        files={"file": ("solution.ipynb", data, "application/octet-stream")},
+        data={"total_points": "100"},
+        headers=professor["headers"],
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total_points"] == 100
+    assert [c["id"] for c in body["criteria"]] == ["load", "model"]
+
+
+def test_rubric_from_solution_rejects_a_bad_file_type(client, professor):
+    response = client.post(
+        "/api/assignments/rubric/from-solution",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+        data={"total_points": "100"},
+        headers=professor["headers"],
+    )
+    assert response.status_code == 415
+
+
 def test_get_rubric(client, professor, assignment):
     response = client.get(f"/api/assignments/{assignment['id']}/rubric",
                           headers=professor["headers"])

@@ -20,10 +20,10 @@ from frontend_streamlit.components.ui import (
     stats_row,
 )
 
-page_setup("Review results", "🔍")
+page_setup("Review results")
 require_auth()
 
-st.title("🔍 Review results")
+st.title("Review results")
 
 course = course_selector()
 if course is None:
@@ -67,7 +67,7 @@ with grades_tab:
     for result in results:
         name = result.get("student_name") or "(unknown student)"
         badge = grade_badge(result["letter_grade"], result["percentage"])
-        approved = " ✅" if result["finalized"] else ""
+        approved = "  ·  approved" if result["finalized"] else ""
 
         with st.expander(
             f"{name} — {result['effective_score']:g}/{result['total_possible']:g}"
@@ -210,13 +210,11 @@ with similarity_tab:
         )
     else:
         for flag in flags:
-            severity_color = {
-                "high": "🔴", "moderate": "🟠", "low": "🟡",
-            }.get(flag["severity"], "⚪")
-            reviewed = " ✅ reviewed" if flag["reviewed"] else ""
+            severity = flag["severity"]
+            reviewed = "  ·  reviewed" if flag["reviewed"] else ""
 
             with st.expander(
-                f"{severity_color} {flag['student_a_name'] or '?'} ↔ "
+                f"[{severity}]  {flag['student_a_name'] or '?'} and "
                 f"{flag['student_b_name'] or '?'} — "
                 f"{flag['similarity_score']:.0%}{reviewed}"
             ):

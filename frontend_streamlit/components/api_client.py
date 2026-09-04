@@ -21,9 +21,53 @@ import streamlit as st
 
 API_BASE = os.environ.get("AUTOGRADE_API_BASE", "http://localhost:8000")
 
-# Grading a full class is slow by design - one Claude call per submission.
+# Grading a full class is slow by design - one model call per submission.
 GRADING_TIMEOUT = 1800  # 30 minutes
 DEFAULT_TIMEOUT = 60
+
+# One session for the whole app: keep-alive + connection pooling means each
+# call reuses a warm connection instead of opening a new one. On a page switch
+# that fires several requests this is a real latency saving.
+_session = requests.Session()
+
+# Read responses are cached for a few seconds, keyed by the caller's token, so
+# a Streamlit rerun (which re-executes the whole page on every click) reuses
+# the last fetch instead of hitting the backend again. Any write clears the
+# cache (see `api_call`), so the UI never shows a stale list after a change.
+_READ_TTL = 6
+
+
+def _token() -> str | None:
+    return st.session_state.get("token")
+
+
+class _Transient(Exception):
+    """A failed read - raised so a transient failure is never cached."""
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _cached_get(endpoint: str, token: str | None, quiet: bool, timeout: int):
+    # `token` keys the cache per user; api_call reads it from the session too.
+    result = api_call("GET", endpoint, quiet=quiet, timeout=timeout)
+    if result is None:
+        raise _Transient
+    return result
+
+
+def _get(endpoint: str, *, quiet: bool = False, timeout: int = DEFAULT_TIMEOUT):
+    """A cached GET. Falls back to None on a transient failure."""
+    try:
+        return _cached_get(endpoint, _token(), quiet, timeout)
+    except _Transient:
+        return None
+
+
+def _bust_cache() -> None:
+    """Drop cached reads after a write so the next read is fresh."""
+    try:
+        st.cache_data.clear()
+    except Exception:  # noqa: BLE001 - not inside a Streamlit run
+        pass
 
 
 def api_call(
@@ -40,7 +84,8 @@ def api_call(
 
     `quiet=True` suppresses the on-page error (useful when a 404 is an
     expected outcome). `raw=True` returns the Response object instead of
-    parsed JSON, for file downloads.
+    parsed JSON, for file downloads. Any successful non-GET request clears
+    the read cache so lists reflect the change immediately.
     """
     headers = kwargs.pop("headers", {})
     token = st.session_state.get("token")
@@ -49,10 +94,12 @@ def api_call(
 
     url = f"{API_BASE}{endpoint}"
     try:
-        response = requests.request(
+        response = _session.request(
             method, url, headers=headers, timeout=timeout, **kwargs
         )
         response.raise_for_status()
+        if method.upper() != "GET":
+            _bust_cache()
         if raw:
             return response
         return response.json() if response.content else {}
@@ -129,14 +176,14 @@ def logout() -> None:
 
 
 def health() -> dict | None:
-    return api_call("GET", "/api/health", quiet=True)
+    return _get("/api/health", quiet=True)
 
 
 # ---------------------------------------------------------------------
 # Courses
 # ---------------------------------------------------------------------
 def list_courses():
-    return api_call("GET", "/api/courses")
+    return _get("/api/courses")
 
 
 def create_course(name: str, term: str | None, canvas_course_id: str | None = None):
@@ -157,11 +204,11 @@ def list_assignments(course_id: str | None = None):
     endpoint = "/api/assignments"
     if course_id:
         endpoint += f"?course_id={course_id}"
-    return api_call("GET", endpoint)
+    return _get(endpoint)
 
 
 def get_assignment(assignment_id: str):
-    return api_call("GET", f"/api/assignments/{assignment_id}")
+    return _get(f"/api/assignments/{assignment_id}")
 
 
 def create_assignment(payload: dict):
@@ -177,7 +224,7 @@ def delete_assignment(assignment_id: str):
 
 
 def get_rubric(assignment_id: str):
-    return api_call("GET", f"/api/assignments/{assignment_id}/rubric")
+    return _get(f"/api/assignments/{assignment_id}/rubric")
 
 
 def preview_rubric(text: str, total_points: float | None = None):
@@ -185,10 +232,27 @@ def preview_rubric(text: str, total_points: float | None = None):
                     json={"text": text, "total_points": total_points})
 
 
+def preview_rubric_from_solution(file, total_points: float = 100.0):
+    """Upload an instructor solution file; the backend builds a rubric from it."""
+    return api_call(
+        "POST", "/api/assignments/rubric/from-solution", timeout=300,
+        files={"file": (file.name, file.getvalue())},
+        data={"total_points": str(total_points)},
+    )
+
+
 def upload_solution(assignment_id: str, file) -> dict | None:
     return api_call(
         "POST", f"/api/assignments/{assignment_id}/solution",
         files={"file": (file.name, file.getvalue())},
+    )
+
+
+def upload_solution_bytes(assignment_id: str, filename: str, data: bytes) -> dict | None:
+    """Attach a solution from raw bytes (used after building a rubric from it)."""
+    return api_call(
+        "POST", f"/api/assignments/{assignment_id}/solution",
+        files={"file": (filename, data)},
     )
 
 
@@ -204,7 +268,7 @@ def upload_submissions(assignment_id: str, files: list) -> dict | None:
 
 
 def list_submissions(assignment_id: str):
-    return api_call("GET", f"/api/assignments/{assignment_id}/submissions")
+    return _get(f"/api/assignments/{assignment_id}/submissions")
 
 
 def update_submission(submission_id: str, payload: dict):
@@ -229,14 +293,13 @@ def grade(assignment_id: str, *, submission_ids: list[str] | None = None,
 # Results
 # ---------------------------------------------------------------------
 def list_results(assignment_id: str, *, flagged_only: bool = False):
-    return api_call(
-        "GET",
-        f"/api/assignments/{assignment_id}/results?flagged_only={str(flagged_only).lower()}",
+    return _get(
+        f"/api/assignments/{assignment_id}/results?flagged_only={str(flagged_only).lower()}"
     )
 
 
 def get_stats(assignment_id: str):
-    return api_call("GET", f"/api/assignments/{assignment_id}/stats")
+    return _get(f"/api/assignments/{assignment_id}/stats")
 
 
 def override(grade_id: str, overrides: dict, summary_feedback: str | None = None):
@@ -262,7 +325,7 @@ def scan_similarity(assignment_id: str, threshold: float = 0.5):
 
 
 def list_similarity(assignment_id: str):
-    return api_call("GET", f"/api/assignments/{assignment_id}/similarity")
+    return _get(f"/api/assignments/{assignment_id}/similarity")
 
 
 def review_similarity(flag_id: str, reviewed: bool, note: str | None = None):
@@ -292,7 +355,7 @@ def export_bytes(assignment_id: str, fmt: str, only_finalized: bool = False):
 
 
 def canvas_status():
-    return api_call("GET", "/api/canvas/status", quiet=True)
+    return _get("/api/canvas/status", quiet=True)
 
 
 def canvas_sync_roster(assignment_id: str):
