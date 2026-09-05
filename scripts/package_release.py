@@ -48,6 +48,19 @@ SECRET_PATTERNS = [
     ("private key", re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 ]
 
+# Obvious stand-ins. Test fixtures and .env.example deliberately carry
+# credential-shaped strings; a real key does not announce itself as fake.
+PLACEHOLDER_MARKERS = (
+    b"test", b"fake", b"dummy", b"example", b"sample", b"placeholder",
+    b"replacement", b"your-", b"xxxx", b"...", b"redacted", b"changeme",
+)
+
+
+def is_placeholder(matched: bytes) -> bool:
+    lowered = matched.lower()
+    return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
+
+
 # Text files are worth scanning; a .png that happens to contain those bytes
 # is not a leak.
 SCANNED_SUFFIXES = {
@@ -122,8 +135,11 @@ def main() -> int:
                 continue
             blob = zf.read(name)
             for label, pattern in SECRET_PATTERNS:
-                if pattern.search(blob):
+                for found in pattern.findall(blob):
+                    if is_placeholder(found):
+                        continue
                     leaks.append(f"{name}: looks like a {label}")
+                    break
 
     if leaks:
         target.unlink()
