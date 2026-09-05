@@ -2,11 +2,14 @@
 
 Release: **v0.9.2-pilot** — a release candidate for a single-department pilot.
 
-This describes the supported production deployment: one host, Docker
-Compose, PostgreSQL, and a background grading worker. It is deliberately
-small. There is no Kubernetes, no Redis, no message broker and no separate
-frontend build, because at this scale each of those adds more failure modes
-than it removes.
+The architecture reference: what runs, where the data is, and what can go
+wrong. One host, Docker Compose, PostgreSQL, and a background grading
+worker. There is no Kubernetes, no Redis, no message broker and no separate
+frontend build, because at this scale each adds more failure modes than it
+removes.
+
+**To install it, follow [INSTALL.md](INSTALL.md).** To run it day to day,
+[RUN_AND_SHARE.md](RUN_AND_SHARE.md). This file is for understanding it.
 
 ---
 
@@ -308,5 +311,5 @@ Without a worker running, grading jobs stay `queued` — which is the expected
 behaviour, not a bug.
 
 ```bash
-pytest -q          # 309 tests, no network and no API key required
+pytest -q          # 363 tests, no network and no API key required
 ```

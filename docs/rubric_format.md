@@ -4,13 +4,13 @@ The rubric is the contract the grader is held to. It never invents
 criteria of its own, and it can never award more than a criterion's
 `max_points` — AutoGrade clamps the score before it reaches the database.
 
-There are three ways to supply one.
+There are four ways to supply one.
 
 ---
 
 ## Option A — Natural language (easiest)
 
-Paste your assignment instructions. Claude extracts the criteria and
+Paste your assignment instructions. The AI extracts the criteria and
 point values, and you review the result before saving.
 
 > Load `housing.csv` with pandas and print its shape (20 points).
@@ -116,7 +116,7 @@ rather than blocking it.
 
 ---
 
-## Default rubric
+## Option D — The default rubric
 
 Create an assignment with no rubric and you get four generic criteria —
 correctness, completeness, code quality, explanation — split evenly.

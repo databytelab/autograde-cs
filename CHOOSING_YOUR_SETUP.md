@@ -1,288 +1,149 @@
-# Choosing how to run AutoGrade
+# Where to run AutoGrade
 
-**The trust question, answered honestly.**
-
-You are worried that colleagues will not want to upload their students'
-work to a website you run. **That worry is correct, and you should take it
-seriously.** This document explains exactly where data goes, what the three
-realistic options are, and which one to pick.
+Read this before you share AutoGrade with anyone. It decides who can read your students' work.
 
 ---
 
-## 1. The distinction that clears up the confusion
+## 1. The three options
 
-There are **two separate questions**, and mixing them up is what makes this
-feel murky:
+| | **1. Their own computer** | **2. Your university hosts one** ⭐ | **3. You host a public website** |
+|---|---|---|---|
+| Where student work is stored | Their machine | University server | Your server |
+| Who can read it | Only them | University IT, and you | **You** |
+| They install anything? | Docker, once | No | No |
+| Canvas push | Works | Works | Works, but their Canvas token sits on your server |
+| Works with no internet | Yes, with Ollama | If Ollama is on the LAN | No |
+| Effort for you | Send the package | One VM | Months |
+| Effort for them | ~30 min | None | None |
+| Trust needed in you | None | Some | A lot |
 
-| | Question | Who controls it |
-|---|---|---|
-| **A. Storage** | Where do the student files *live*? | Whoever runs the AutoGrade server |
-| **B. Processing** | Who does the AI call go to? | Whoever's API key is used |
-
-They are independent. The "bring your own key" feature answers **B** — it
-lets a professor use their own OpenAI account, so the AI call happens under
-*their* contract and *their* bill.
-
-**It does not answer A.** Their students' files are still stored on
-whatever server AutoGrade is running on. If that is your machine, you have
-their data.
-
-So: *BYOK does not make a hosted service private.* Only where you run the
-server does that.
+**Option 2 for your own university. Option 1 for everyone else. Do not build option 3.**
 
 ---
 
-## 2. What actually happens to a submission
+## 2. What happens to a submission
 
-Trace it end to end, with no hand-waving:
+1. The instructor uploads `alice_hw3.ipynb` in their browser
+2. It travels over HTTPS to the AutoGrade server
+3. It is written to that server's disk as an ordinary file
+4. The parsed text is stored in that server's database
+5. The text is sent to the AI provider to be graded
+6. The grade and feedback are stored back in that database
 
-1. The instructor uploads `alice_hw3.ipynb` in their browser.
-2. It travels over HTTPS to the AutoGrade server.
-3. **It is written to that server's disk**, in the `uploads` volume, as an
-   ordinary file.
-4. It is parsed and the parsed text is stored in **that server's
-   PostgreSQL database**.
-5. The text of the submission is sent to the AI provider (OpenAI, Claude,
-   or a local model) to be graded.
-6. The grade and feedback are stored back in that database.
+Two facts you must be able to say out loud:
 
-Two things follow that you must be able to say out loud to a colleague:
-
-> **Anyone with administrator access to the server can read every
-> submission.** Files on disk are plain files; database rows are plain
-> rows. Only professors' API keys are encrypted. This is true of nearly
-> every hosted tool, but it should be stated rather than glossed over.
-
-> **If you run the server, you are the custodian of their students'
-> work** — with whatever that implies under your institution's rules and
-> under data-protection law (PIPL in China, GDPR in Europe, FERPA in the
-> US).
+- **Anyone with administrator access to the server can read every submission.** Files on disk are plain files. Only API keys and Canvas tokens are encrypted.
+- **If you run the server, you are the custodian of their students' work**, under your institution's rules and under data-protection law (PIPL, GDPR, FERPA).
 
 ### About the AI provider
 
-Step 5 sends coursework text to a third party. Two mitigations, both real:
-
-- **OpenAI and Anthropic both state that data sent through their APIs is
-  not used to train their models by default.** That is their published API
-  policy and it is the main reason API use is defensible where using the
-  consumer chat products would not be. Check their current terms yourself
-  before you tell a colleague — policies change and you will be quoted.
-- **A local model sends nothing anywhere.** With Ollama, step 5 never
-  leaves the building. See option 1 and option 2 below.
+- **OpenAI and Anthropic both state that API data is not used to train their models by default.** Check their current terms yourself before you quote them.
+- **A local model sends nothing anywhere.** With Ollama, step 5 never leaves the building.
 
 ---
 
-## 3. Canvas: fixed mechanically, still awkward socially
+## 3. Storage and processing are separate questions
 
-This used to be a hard blocker: one `CANVAS_API_TOKEN` for the whole
-server meant every push went out with one person's Canvas permissions, so
-a shared instance could only write grades into that person's courses.
+| | Question | Who controls it |
+|---|---|---|
+| **Storage** | Where do the student files live? | Whoever runs the server |
+| **Processing** | Who does the AI call go to? | Whoever's API key is used |
 
-**That is fixed.** Each instructor now connects their own Canvas under
-**Settings → Canvas**. The token is encrypted at rest and used only for
-their own requests, so one instance can serve a whole department, each
-professor pushing into their own courses.
+"Bring your own key" answers **processing** only. The files still sit on whoever's server AutoGrade runs on.
 
-What is *not* fixed is who holds the token, and no amount of engineering
-can fix it:
-
-- A Canvas API token acts as that person, across every course they teach,
-  with full read and write. It is a far bigger ask than a folder of
-  submissions.
-- On an instance **you** host, that token sits in **your** database,
-  encrypted with **your** key. Encryption protects it from an outsider who
-  steals the disk. It does not protect it from the person who runs the
-  server.
-- On an instance **their** department hosts, the same token sits on their
-  own hardware, encrypted with their own key. Nothing changes for them
-  except who they have to trust — and the answer becomes "ourselves".
-
-So Canvas no longer decides *whether* a shared instance can work. It
-decides *whose* shared instance it should be: the institution whose Canvas
-it is talking to.
+**A professor using their own API key on your server has not kept their data private.** Only where the server runs decides that.
 
 ---
 
-## 4. The three ways to run it
+## 4. Canvas
 
-### Option 1 — Each instructor runs it on their own computer
+Each instructor connects their own Canvas account, so one instance serves a whole department and every professor pushes into their own courses.
 
-**Nothing ever leaves their machine** (and with Ollama, nothing leaves at
-all — no internet needed after setup).
+What no engineering can change: a Canvas API token acts as that person, across every course they teach, with full read and write.
 
-- They install Docker Desktop once, then run one command.
-- They are their own administrator. You never see their data.
-- Realistically ~20 minutes of setup with `INSTALL.md`, most of it
-  waiting for Docker to download.
+- On an instance **you** host, that token sits in **your** database, encrypted with **your** key.
+- On an instance **their** department hosts, it sits on their own hardware, encrypted with their own key.
 
-**Good for:** the privacy-maximalist colleague, anyone at another
-institution, anyone who says "I'd rather not".
+Canvas does not decide whether a shared instance works. It decides whose it should be: the institution whose Canvas it is.
 
-**Cost:** they must install Docker. Their laptop must be on while grading.
-Canvas push works, because they connect their own Canvas under
-**Settings → Canvas** and the token never leaves their machine.
+---
 
-### Option 2 — Your university or department runs one instance ⭐
+## 5. Option 1 — they run it themselves
 
-One server inside the university, run by IT or by you on a university VM.
-Everyone at the university signs in with a link and a password.
+Send them the ZIP and [INSTALL.md](INSTALL.md). They run one command.
 
-- **Student data never leaves the institution that already holds it.**
-  It sits alongside Canvas, on university infrastructure, under university
-  policy. That is a completely different conversation from "it's on
-  Irfan's computer".
-- Colleagues install nothing.
-- Canvas push works properly — one institution, one Canvas, and each
-  professor connecting their own account.
-- IT can inspect the code and the deployment before approving it.
+- Nothing ever leaves their machine. With Ollama, nothing leaves at all
+- They are their own administrator. You never see their data
+- About 30 minutes, most of it Docker downloading
 
-**Good for:** essentially everyone at your own university. **This is the
-recommended option.**
+**Good for:** anyone at another institution, anyone hesitant, anyone who says "I'd rather not".
 
-**Cost:** you need a VM and, ideally, IT's blessing. That conversation is
-much easier than it sounds, because you are not asking them to trust a
-third party — you are asking to run software on their own hardware.
+**Cost to them:** they must install Docker, and their machine must be on while grading.
 
-### Option 3 — You host a public website others sign up to
+---
 
-Easiest for users, hardest for you, and the one you were imagining.
+## 6. Option 2 — your university hosts one ⭐
 
-**Good for:** nothing yet. Choose it only if this becomes a product you
-intend to support.
+One server inside the university, run by IT or by you on a university VM. Everyone signs in with a link and a password.
 
-**What it would actually require**, none of which exists today:
+- Student data never leaves the institution that already holds it
+- Colleagues install nothing
+- IT can inspect the code and the deployment before approving it
+
+**Good for:** everyone at your own university.
+
+**Cost to you:** a VM, and a conversation with IT — an easy one, because you are asking to run software on their own hardware, not asking them to trust a third party.
+
+**What to ask IT for:**
+
+- A VM that stays on: 4 GB RAM, 10 GB disk
+- Docker installed
+- A DNS name that resolves on campus
+- Ports 80 and 443 open to campus
+- Outbound HTTPS to your AI provider
+
+---
+
+## 7. Option 3 — a public website
+
+**Do not build this yet.** It would require, none of which exists today:
 
 - A legal entity and a data-processing agreement with each institution
 - A published privacy policy and retention schedule
-- Encryption of submissions at rest, and an audit log of administrator
-  access
+- Encryption of submissions at rest, and an audit log of administrator access
 - Self-service account and data deletion
-- Security response, uptime commitments, backups you are contractually
-  on the hook for
+- Security response, uptime commitments, contractual backups
 - Somebody paying the AI bill, or per-user billing
 
-That is a company, not a weekend project. Do not start here.
+That is a company, not a side project.
 
 ---
 
-## 5. Side by side
+## 8. What to do
 
-| | 1. Their own computer | 2. University-hosted ⭐ | 3. Public website |
-|---|---|---|---|
-| Where student work is stored | Their laptop | University server | Your server |
-| Who can read it | Only them | University IT + you | **You** |
-| They install anything? | Docker, once | No | No |
-| Canvas push | Works (own token) | Works (own token) | Works — but their Canvas token lives on **your** server (§3) |
-| Works fully offline | Yes, with Ollama | If Ollama is on the LAN | No |
-| Effort for you | Write a guide | One VM | Months |
-| Effort for them | ~20 min | Zero | Zero |
-| Trust needed in you | None | Some | **A lot** |
+1. **Now** — run one instance for your own department. Host it on a university machine, not your laptop. Invite 3–5 colleagues.
+2. **For anyone outside your university** — hand over the package, do not host it. Send the ZIP and INSTALL.md. They add their own AI key and their own Canvas token. Nothing of theirs touches a machine of yours. What you sell is installation, configuration, support and upgrades.
+3. **Do not build the public website** unless several institutions ask and someone funds it properly.
 
 ---
 
-## 6. What to actually do
+## 9. Things that build trust, whichever option you pick
 
-**Recommended plan:**
-
-1. **Now — run one instance for your department at Hainan University.**
-   Host it on a university machine, not your personal laptop. Invite the
-   first 3–5 colleagues (see `RUN_AND_SHARE.md` §14). Their data stays on
-   university infrastructure, which is where it already is. This removes
-   almost all of the trust problem in one step.
-
-2. **For anyone outside your university — hand over the package, do not
-   host it.** Send them the ZIP (`RUN_AND_SHARE.md` §15) and `INSTALL.md`.
-   They run one command, add their own AI key and their own Canvas token,
-   and nothing of theirs ever touches a machine of yours. What you sell is
-   installation, configuration, support and upgrades — the part that is
-   genuinely hard — rather than storage of other people's student work,
-   which is the part that is genuinely risky.
-
-   This is not a compromise. "I never see your data, and here is why that
-   is structurally true" is a stronger sales position than any privacy
-   policy you could write for a hosted service.
-
-3. **Do not build the public website** unless and until several
-   institutions ask for it and someone is funding it properly — including
-   funding whoever has to answer for a breach.
+- Show them the rubric. The AI is held to it and can never exceed a criterion's maximum
+- Show them they approve every grade
+- Say which AI provider is used, and that API data is not used for training
+- Offer the local-model option to anyone who wants nothing to leave the building
+- Tell them where backups live and how long they are kept
+- Start with last term's coursework, never live grading
 
 ---
 
-## 7. Things that build trust, whichever option you pick
+## 10. Sentences you can reuse
 
-These are cheap and they genuinely help.
+> "Your students' files are stored on the university's server, alongside Canvas, under university policy. I don't have a copy."
 
-**Grade anonymously.** AutoGrade does not need real names to grade — it
-judges the code and the output. An instructor can rename files
-`s001.ipynb`, `s002.ipynb` before uploading and match names back from the
-exported CSV on their own computer. Now even a compromised server holds
-coursework with no names attached. **This is the single most effective
-privacy measure available today, and it costs one spreadsheet column.**
+> "Every grade is a proposal until you approve it. The tool never publishes anything on its own."
 
-**Use a local model for sensitive work.** With Ollama, step 5 of §2 never
-happens. Grading is slower and small models are more lenient — spot-check
-them — but nothing leaves.
+> "Submissions go to the OpenAI API, which does not use API data for training. If you'd rather nothing left the building, we can run a local model instead."
 
-**Show them the code.** It is open, readable, and heavily commented. "Read
-it yourself, or have your IT read it" is an argument a closed SaaS cannot
-make.
-
-**Be specific about what you can see.** Do not say "it's secure". Say: *"I
-run the server, so technically I can read files on it. I don't, and here is
-how to run it yourself if you'd rather not take my word."* That sentence
-earns more trust than any reassurance.
-
-**Delete data when a term ends.** Deleting an assignment removes its
-uploaded files. Make it a habit and tell people it is your habit.
-
-**Say what the AI provider does with it.** Point at the provider's API
-terms (§2) rather than paraphrasing them.
-
----
-
-## 8. Quick decision guide
-
-> **Is the instructor at your university?**
-> **No** → Option 1. They run it themselves.
-> **Yes** ↓
->
-> **Can you get a university VM (or has IT agreed)?**
-> **Yes** → **Option 2.** Recommended. Everyone signs in, nothing to install.
-> **No, only my own laptop** ↓
->
-> **Is this a real class's live grades?**
-> **No, we're trialling on last term's work** → Fine, run it on your
-> machine for the pilot, and be explicit that it is your machine.
-> **Yes, live student records** → Do not host other people's live grading
-> on a personal machine. Either get the VM, or have them use Option 1.
-
----
-
-## 9. Sentences you can reuse
-
-**To a cautious colleague:**
-
-> AutoGrade runs on a university server, so your students' files stay on
-> university infrastructure — the same place Canvas keeps them. The AI
-> grading call goes to OpenAI's API, which under their API terms is not
-> used to train their models; you can also use a local model, in which case
-> nothing leaves the building. If you would rather not use my instance at
-> all, the code is open and you can run it on your own computer in about
-> twenty minutes — I have written the guide.
-
-**To your IT department:**
-
-> This is an open-source tool that runs entirely in Docker on one VM:
-> a web frontend, an API, a background worker, and PostgreSQL. Only the
-> reverse proxy is exposed; the database has no internet access at all.
-> Student submissions stay on our infrastructure. The only outbound traffic
-> is the grading call to the AI provider, and that can be pointed at a local
-> model instead. Grades are proposals — no grade is published without an
-> instructor approving it. I would like a VM and a DNS name.
-
-**When someone asks "can you see my students' work?":**
-
-> On my instance, yes — an administrator can read files on the server. I
-> don't, but you should not have to take that on faith. Two options: grade
-> with anonymised filenames so there are no names in what I hold, or run
-> your own copy so I hold nothing at all.
+> "If you'd prefer to run it yourself, here's the package and the guide. It's one command, and then I never see anything."

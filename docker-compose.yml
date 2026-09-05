@@ -1,13 +1,15 @@
-# AutoGrade CS - local/production stack
+# AutoGrade CS - development stack
 #
 #   docker compose up --build
 #
 #   backend   http://localhost:8000/docs
 #   frontend  http://localhost:8501
 #
-# Copy .env.example to .env and fill in ANTHROPIC_API_KEY and SECRET_KEY
-# before starting. The default profile runs SQLite; `--profile postgres`
-# swaps in a real database.
+# Copy .env.example to .env and fill in your API key and SECRET_KEY before
+# starting. The default profile runs SQLite; `--profile postgres` swaps in
+# a real database.
+#
+# For a real installation use docker-compose.prod.yml - see INSTALL.md.
 
 services:
   backend:
@@ -25,6 +27,29 @@ services:
       # Student files and the SQLite database must outlive the container.
       - uploads:/app/uploads
       - data:/app/data
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    # Grading runs here, not in the web request. Without this service,
+    # jobs are accepted and then sit at "queued" forever.
+    command: ["python", "-m", "backend.worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/autograde.db}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      # The same files and the same database the backend writes.
+      - uploads:/app/uploads
+      - data:/app/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    # It serves no port, so the backend's HTTP healthcheck cannot apply.
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   frontend:

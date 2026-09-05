@@ -39,6 +39,16 @@ def test_later_accounts_are_not_administrators(client):
     assert second.json()["user"]["is_admin"] is False
 
 
+def test_registration_status_field_names_are_a_contract(client):
+    """
+    The sign-in page decides whether to offer "Create account" from these
+    two field names. Renaming one here hides the button on every install
+    while every other test still passes, so pin them.
+    """
+    body = client.get("/api/auth/registration-status").json()
+    assert set(body) == {"open", "needs_first_account"}
+
+
 def test_registration_status_reports_a_fresh_install(client):
     body = client.get("/api/auth/registration-status").json()
     assert body["needs_first_account"] is True

@@ -484,8 +484,14 @@ def delete_canvas_settings():
 # Account and people
 # ---------------------------------------------------------------------
 def registration_status():
-    """Whether the sign-in page should offer "Create an account"."""
-    return api_call("GET", "/api/auth/registration-status", quiet=True)
+    """
+    Whether the sign-in page should offer "Create an account".
+
+    Cached like every other read, because the landing page asks more than
+    once per render. Creating the first account is a POST, which clears
+    the cache, so the button disappears on the very next page.
+    """
+    return _get("/api/auth/registration-status", quiet=True)
 
 
 def change_password(current_password: str, new_password: str):

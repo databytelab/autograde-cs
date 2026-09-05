@@ -120,10 +120,13 @@ class FakeBackend:
     UNSET = object()
 
     def __init__(self, *, anthropic_configured: bool = True,
-                 canvas_configured: bool = False, courses=UNSET):
+                 canvas_configured: bool = False, courses=UNSET,
+                 signup_open: bool = True, needs_first_account: bool = False):
         self.anthropic_configured = anthropic_configured
         self.canvas_configured = canvas_configured
         self.courses = COURSE if courses is FakeBackend.UNSET else courses
+        self.signup_open = signup_open
+        self.needs_first_account = needs_first_account
 
     # -- status --
     def health(self):
@@ -133,6 +136,13 @@ class FakeBackend:
 
     def canvas_status(self):
         return {"configured": self.canvas_configured, "base_url": None}
+
+    def registration_status(self):
+        # These key names are the contract with GET
+        # /api/auth/registration-status. They are pinned by
+        # test_registration_status_field_names_are_a_contract.
+        return {"open": self.signup_open,
+                "needs_first_account": self.needs_first_account}
 
     # -- reads --
     def list_courses(self):
@@ -266,6 +276,46 @@ def test_home_shows_the_landing_page_when_signed_out(fake_backend):
     button_labels = {b.label for b in app.button}
     assert "Sign in to start" in button_labels
     assert "Create account" in button_labels
+
+
+def test_a_shipped_instance_does_not_offer_account_creation(fake_backend):
+    """
+    Sign-up is closed on a real installation. Offering a button that can
+    only answer 403 sends a colleague looking for a bug that is not there.
+    """
+    fake_backend(signup_open=False, needs_first_account=False)
+    app = run_page(PAGES["app"], signed_in=False)
+    assert not app.exception
+    assert "Create account" not in {b.label for b in app.button}
+    assert "Sign in to start" in {b.label for b in app.button}
+
+
+def test_a_fresh_install_does_offer_account_creation(fake_backend):
+    """Otherwise nobody could ever set one up."""
+    fake_backend(signup_open=False, needs_first_account=True)
+    app = run_page(PAGES["app"], signed_in=False)
+    assert "Create account" in {b.label for b in app.button}
+
+
+def test_the_sign_in_view_says_where_accounts_come_from(fake_backend):
+    fake_backend(signup_open=False, needs_first_account=False)
+    app = run_page(PAGES["app"], signed_in=False,
+                   session_state={"ag_view": "signin"})
+    assert not app.exception
+    captions = " ".join(c.value for c in app.caption)
+    assert "administrator" in captions
+    assert "Create an account" not in {b.label for b in app.button}
+
+
+def test_the_sign_up_view_is_refused_when_signup_is_closed(fake_backend):
+    """Reaching it by a stale link must not present an unusable form."""
+    fake_backend(signup_open=False, needs_first_account=False)
+    app = run_page(PAGES["app"], signed_in=False,
+                   session_state={"ag_view": "signup"})
+    assert not app.exception
+    labels = {w.label for w in app.text_input}
+    assert "Full name" not in labels
+    assert "Email" in labels and "Password" in labels
 
 
 def test_home_shows_the_credential_fields_in_the_auth_view(fake_backend):

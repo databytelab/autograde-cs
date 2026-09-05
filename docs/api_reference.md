@@ -48,10 +48,22 @@ exists.
 ### Auth
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/auth/register` | Create an account, return a token. 409 if the email is taken. |
+| GET | `/api/auth/registration-status` | Public. `needs_first_account`, `open_registration`. |
+| POST | `/api/auth/register` | Create an account, return a token. The first account on a fresh install becomes the administrator. 403 once sign-up is closed. 409 if the email is taken. |
 | POST | `/api/auth/login` | Form login (OAuth2 password flow). |
-| POST | `/api/auth/login-json` | JSON login. |
+| POST | `/api/auth/login-json` | JSON login. 403 if the account is deactivated. |
 | GET | `/api/auth/me` | The account behind the current token. |
+| POST | `/api/auth/change-password` | Change your own. Requires `current_password`. |
+
+### Account administration
+**Administrator only.** Every one of these returns 403 otherwise.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/auth/users` | Every account on this instance. |
+| POST | `/api/auth/users` | Create an account for someone else. |
+| POST | `/api/auth/users/{user_id}/reset-password` | Set a new password for them. |
+| POST | `/api/auth/users/{user_id}/deactivate` | Block sign-in. 400 on your own account. |
 
 ### Courses
 | Method | Path | Description |
@@ -72,6 +84,7 @@ exists.
 | DELETE | `/api/assignments/{id}` | Delete it and its files. **Professor only.** |
 | GET | `/api/assignments/{id}/rubric` | The stored rubric, or the default. |
 | POST | `/api/assignments/rubric/preview` | Prose → rubric, saving nothing. Costs one API call. |
+| POST | `/api/assignments/rubric/from-solution` | Worked solution → rubric (multipart), saving nothing. |
 | POST | `/api/assignments/{id}/solution` | Attach an instructor reference solution (multipart). |
 
 ### Submissions
@@ -108,19 +121,30 @@ Body (all optional):
 {"submission_ids": ["..."], "regrade": false, "include_images": true}
 ```
 
-Runs **synchronously** — one Claude call per submission, roughly 15–40
-seconds each. Omit `submission_ids` to grade everything ungraded. Already
-graded submissions are skipped unless `regrade` is true; a regrade clears
-any previous approval.
-
-A failure on one submission never stops the batch:
+Returns **202 Accepted** with a job. Grading happens in a separate worker
+process, so the request does not stay open and closing the browser does not
+stop it. Roughly 15–40 seconds per submission.
 
 ```json
-{"assignment_id": "...", "graded": 6, "failed": 1, "skipped": 2,
- "results": [{"submission_id": "...", "student_name": "Alice Chen",
-              "ok": true, "total_score": 89.0, "percentage": 89.0,
-              "letter_grade": "B+", "flags": []}]}
+{"job_id": "...", "assignment_id": "...", "status": "queued", "total": 12}
 ```
+
+Omit `submission_ids` to grade everything ungraded. Already graded
+submissions are skipped unless `regrade` is true; a regrade clears any
+previous approval. 409 if a job is already running for that assignment.
+
+A failure on one submission never stops the batch.
+
+### Jobs
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/assignments/{id}/jobs/latest` | The most recent job for this assignment, or 404. |
+| GET | `/api/jobs/{job_id}` | Progress: `status`, `processed`, `total`, `failed`, `skipped`. |
+| POST | `/api/jobs/{job_id}/cancel` | Stop a queued or running job. Grades already produced are kept. |
+
+`status` is one of `queued`, `running`, `completed`, `failed`, `cancelled`.
+A worker that dies mid-job stops sending heartbeats; the job is reclaimed
+and resumes without re-grading what was already done.
 
 ### Results
 | Method | Path | Description |
@@ -157,11 +181,35 @@ Overrides are stored **beside** the AI scores, never over them:
 ### Canvas
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/canvas/status` | Whether Canvas is configured on this server. |
+| GET | `/api/canvas/status` | Whether *this user* can reach Canvas. `source` is `personal` or `server`. |
 | GET | `/api/canvas/courses` | Courses the token can teach. |
 | GET | `/api/canvas/courses/{id}/assignments` | Assignments in a Canvas course. |
 | POST | `/api/assignments/{id}/canvas/sync-roster` | Match submissions to roster students. |
 | POST | `/api/assignments/{id}/canvas/push-grades` | Push grades. **Professor only**, finalized-only by default. |
+
+### Settings — AI providers
+Per-user. Keys are encrypted at rest, returned only masked, and never logged.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/settings/providers` | Your saved keys (masked) and which one grades your work. |
+| PUT | `/api/settings/providers` | Save or replace a key for `openai`, `anthropic`, or `local`. |
+| DELETE | `/api/settings/providers/{provider}` | Remove a key. You fall back to the server's. |
+| POST | `/api/settings/providers/{provider}/test` | One small live call, to prove the key works. |
+| PUT | `/api/settings/providers/preference` | Choose which account grades your submissions. |
+| GET | `/api/settings/providers/local/discover` | Models the given Ollama server actually has. |
+
+Saving a key does not switch grading to it. That is `preference`.
+
+### Settings — Canvas
+Per-user, and preferred over the server-wide `.env` values.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/settings/canvas` | Your connection: `connected`, `base_url`, `masked_token`. |
+| PUT | `/api/settings/canvas` | Save the URL and token. Omit the token to correct only the URL. |
+| DELETE | `/api/settings/canvas` | Disconnect. 404 if you had none. |
+| POST | `/api/settings/canvas/test` | Ask Canvas who the token belongs to. |
 
 ### Health
 | Method | Path | Description |
@@ -174,11 +222,13 @@ Overrides are stored **beside** the AI scores, never over them:
 
 | Code | Meaning here |
 |------|--------------|
+| 202 | Grading job accepted and queued |
 | 400 | Malformed request — empty PATCH body, unknown export format, missing Canvas id |
 | 401 | Missing, invalid, or expired token |
 | 403 | Authenticated but not permitted (TA attempting a professor action) |
 | 404 | Not found **or not yours** |
-| 409 | Duplicate email; editing a finalized grade |
+| 409 | Duplicate email; editing a finalized grade; a grading job already running |
+| 429 | Too many failed sign-in attempts |
 | 413 | Upload exceeds `MAX_FILE_SIZE_MB` |
 | 415 | Unsupported file type |
 | 422 | Validation failed — see the `problems` array |

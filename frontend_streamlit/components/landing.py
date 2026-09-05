@@ -424,9 +424,27 @@ def _goto(view: str | None) -> None:
     st.rerun()
 
 
+def _signup_is_offered() -> bool:
+    """
+    Whether to show "Create an account" at all.
+
+    On a shipped instance sign-up is closed, and offering a button that
+    can only ever answer 403 is worse than not offering it. The one
+    exception is a fresh install, which has nobody to create the first
+    account but the person standing in front of it.
+    """
+    status = api_client.registration_status()
+    if status is None:          # backend unreachable; it says so elsewhere
+        return True
+    return bool(status.get("needs_first_account") or status.get("open"))
+
+
 def _auth_view(view: str) -> None:
     """The sign-in / create-account page."""
     signing_in = view == "signin"
+    if not signing_in and not _signup_is_offered():
+        st.session_state["ag_view"] = "signin"
+        signing_in = True
     st.markdown(
         '<div class="ag-auth">'
         f'<span class="ag-brand">{_icon(_CAP, 22)}<b>AutoGrade CS</b></span>'
@@ -477,25 +495,36 @@ def _auth_view(view: str) -> None:
                                              password, role):
                         _goto(None)
 
-        switch, back = st.columns(2)
-        if signing_in:
-            if switch.button("Create an account", use_container_width=True):
-                _goto("signup")
+        offer_signup = _signup_is_offered()
+        if signing_in and not offer_signup:
+            st.caption("Accounts are created by your administrator. "
+                       "Ask them for one if you do not have it yet.")
+            if st.button("Back", use_container_width=True):
+                _goto(None)
         else:
-            if switch.button("I already have an account", use_container_width=True):
-                _goto("signin")
-        if back.button("Back", use_container_width=True):
-            _goto(None)
+            switch, back = st.columns(2)
+            if signing_in:
+                if switch.button("Create an account", use_container_width=True):
+                    _goto("signup")
+            else:
+                if switch.button("I already have an account",
+                                 use_container_width=True):
+                    _goto("signin")
+            if back.button("Back", use_container_width=True):
+                _goto(None)
 
 
 def _cta() -> None:
     """The two calls to action, centred under the workflow."""
-    _, primary, secondary, _ = st.columns([2, 1.05, 1.05, 2])
+    if _signup_is_offered():
+        _, primary, secondary, _ = st.columns([2, 1.05, 1.05, 2])
+        if secondary.button("Create account", use_container_width=True):
+            _goto("signup")
+    else:
+        _, primary, _ = st.columns([2, 1.05, 2])
     if primary.button("Sign in to start", type="primary",
                       use_container_width=True):
         _goto("signin")
-    if secondary.button("Create account", use_container_width=True):
-        _goto("signup")
 
 
 def render_landing() -> None:
