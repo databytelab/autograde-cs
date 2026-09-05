@@ -26,7 +26,12 @@ To install it in the first place, see **[INSTALL.md](INSTALL.md)**.
 
 Double-click **`Start AutoGrade`**.
 
-It takes about twenty seconds, then your browser opens at `http://localhost:8501`.
+It takes about twenty seconds, then your browser opens by itself.
+
+> The address is normally `http://localhost:8501`. If another program was
+> already using that door, AutoGrade took the next one and printed the
+> real address in the window — use that number wherever this guide
+> says 8501.
 
 **Expected result:**
 
@@ -74,8 +79,11 @@ You will be sent a new ZIP file.
 
 1. Double-click **`Backup AutoGrade`** and wait for it to finish
 2. Extract the new ZIP somewhere temporary
-3. Copy everything from inside it **into your existing AutoGrade folder**, replacing files when Windows asks
-   - Do **not** delete your existing folder. Your `.env` and `backups` must stay
+3. Open the folder that came out of the new ZIP, select everything inside
+   it, and copy it **into your existing AutoGrade folder**, replacing files
+   when Windows asks
+   - Do **not** delete your existing folder first. Your `.env` and
+     `backups` must stay where they are
 4. Double-click **`Update AutoGrade`**
 
 **Expected result:**
@@ -92,7 +100,8 @@ Your courses, grades, files, AI key and Canvas connection all survive. Update ta
 
 Covered properly in **[BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md)**. The short version:
 
-- A copy is saved automatically every 24 hours while AutoGrade runs
+- A copy of the gradebook **and the student files** is saved automatically
+  every 24 hours while AutoGrade is running
 - Double-click **Backup AutoGrade** before anything risky
 - **Copy the `backups` folder to a USB stick or your university Drive once a month.** A backup on the same computer does not survive losing the computer
 

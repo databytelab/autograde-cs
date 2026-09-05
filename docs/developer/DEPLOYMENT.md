@@ -1,6 +1,6 @@
 # AutoGrade CS — deployment guide
 
-Release: **v0.9.2-pilot** — a release candidate for a single-department pilot.
+Release: **v0.9.3-pilot** — a release candidate for a single-department pilot.
 
 The architecture reference: what runs, where the data is, and what can go
 wrong. One host, Docker Compose, PostgreSQL, and a background grading
@@ -47,7 +47,7 @@ called around the proxy.
 
 ```bash
 git clone <your-remote> autograde && cd autograde
-git checkout v0.9.2-pilot
+git checkout v0.9.3-pilot
 cp .env.example .env
 ```
 
@@ -215,7 +215,7 @@ first — it is the rollback.
 ### Rollback
 
 ```bash
-git checkout v0.9.2-pilot
+git checkout v0.9.3-pilot
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
@@ -311,5 +311,5 @@ Without a worker running, grading jobs stay `queued` — which is the expected
 behaviour, not a bug.
 
 ```bash
-pytest -q          # 363 tests, no network and no API key required
+pytest -q          # no network and no API key required
 ```

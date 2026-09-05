@@ -1,7 +1,8 @@
 # Install AutoGrade
 
 **Time needed:** about 30 minutes, most of it waiting for a download.
-**You need:** a Windows computer, and about 10 GB of free disk space.
+**You need:** a Windows computer and about 10 GB of free disk space.
+(Mac and Linux work too — see the last section.)
 
 You install one program (Docker Desktop), then double-click one file. That is the whole installation. You will not edit any settings files, type any commands, or need to understand what is running.
 
@@ -33,9 +34,16 @@ Docker is the program that runs AutoGrade. You install it once and never think a
 3. Choose a folder you will not accidentally delete — `Documents` is a good choice, the Desktop is fine too
 4. Click **Extract**
 
-**Expected result:** a folder named something like `autograde-v0.9.3` containing files including **Start AutoGrade**.
+**Expected result:** a folder named `autograde-v0.9.3-pilot` containing files including **Start AutoGrade**.
 
-> Do not move this folder after you start using AutoGrade. Your courses and grades live inside it.
+> Never move this folder while AutoGrade is running. If you do need to move
+> it later, close AutoGrade first (**Stop AutoGrade**), move it, then start
+> it again.
+>
+> Your courses and grades are **not** kept inside this folder - Docker stores
+> them separately on this computer. That is why copying the folder to another
+> machine does not bring your grades along, and why
+> [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) exists.
 
 ---
 
@@ -56,6 +64,13 @@ AutoGrade is ready
 ```
 
 and your web browser opens AutoGrade by itself.
+
+> **Write down the address it printed.** It is normally
+> `http://localhost:8501`, but if another program on your computer is
+> already using that door, AutoGrade quietly takes the next one -
+> `http://localhost:8502`, and so on. Whatever the window printed is
+> your address from now on. Every guide says 8501; use your number if it
+> is different.
 
 > **If Windows shows a security warning** ("Windows protected your PC"), click **More info** → **Run anyway**. This appears because the file was downloaded, not because anything is wrong.
 

@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from backend.version import APP_VERSION
+
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend_streamlit"
 
 PAGES = {
@@ -133,7 +135,7 @@ class FakeBackend:
 
     # -- status --
     def health(self):
-        return {"status": "ok", "version": "1.0.0", "environment": "test",
+        return {"status": "ok", "version": APP_VERSION, "environment": "test",
                 "anthropic_configured": self.anthropic_configured,
                 "canvas_configured": self.canvas_configured}
 
@@ -561,3 +563,20 @@ def test_the_canvas_page_explains_where_the_token_comes_from(fake_backend):
     rendered = page_text(app)
     assert "Approved Integrations" in rendered
     assert "New Access Token" in rendered
+
+
+def test_the_export_page_lets_you_set_the_canvas_ids(fake_backend):
+    """
+    These used to be dead-end warnings, one of which told a professor to
+    "edit it via the API" - for a value the interface could only set while
+    the course was being created. Connect Canvas after making your course
+    and there was no way forward but to delete and recreate it.
+    """
+    fake_backend(canvas_configured=True)
+    app = run_page(PAGES["export"])
+    assert not app.exception
+    labels = {w.label for w in app.text_input}
+    assert "Canvas course ID" in labels
+    assert "Canvas assignment ID" in labels
+    assert "Save Canvas IDs" in {b.label for b in app.button}
+    assert "via the API" not in page_text(app)

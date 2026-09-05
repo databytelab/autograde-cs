@@ -110,6 +110,13 @@ def version() -> str:
         return "snapshot"
 
 
+def _declared_version() -> str | None:
+    """What the application itself reports as its version."""
+    text = (ROOT / "backend" / "version.py").read_text(encoding="utf-8")
+    match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', text)
+    return match.group(1) if match else None
+
+
 def main() -> int:
     try:
         run("git", "rev-parse", "--git-dir")
@@ -126,6 +133,19 @@ def main() -> int:
             return 1
 
     tag = version()
+
+    # The health endpoint is the first thing support asks for, so the
+    # version it reports has to be the version in the box. These drifted
+    # apart once already - the app said 1.0.0 while the release was
+    # v0.9.3-pilot.
+    declared = _declared_version()
+    if declared and tag.lstrip("v") != declared:
+        print(f"Version mismatch: the tag says {tag!r} but "
+              f"backend/version.py says {declared!r}.", file=sys.stderr)
+        print("Update backend/version.py, or tag the release to match.",
+              file=sys.stderr)
+        return 1
+
     DIST.mkdir(exist_ok=True)
     target = DIST / f"autograde-{tag}.zip"
 

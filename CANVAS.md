@@ -77,11 +77,17 @@ AutoGrade needs to know which Canvas course and which Canvas assignment to write
 
 ### Put them into AutoGrade
 
-1. Click **2 · New assignment** in the sidebar
-2. Expand **Courses**, select your course, and put the number into **Canvas course ID**
-3. Save
-4. Select your assignment and put the number into **Canvas assignment ID**
-5. Save
+1. Click **5 · Export** in the sidebar
+2. Choose your course and assignment at the top
+3. Scroll down to **Canvas**
+4. Type the two numbers into **Canvas course ID** and **Canvas assignment ID**
+5. Click **Save Canvas IDs**
+
+**Expected result:** the warning is replaced by the two push steps.
+
+> You can also set them when you first create a course and an assignment,
+> under **2 · New assignment**. Doing it here works whether or not you
+> did.
 
 ---
 
@@ -92,7 +98,7 @@ AutoGrade guesses student names from filenames. Before pushing grades, it checks
 1. Click **5 · Export** in the sidebar
 2. Choose the course and assignment
 3. Scroll to **Canvas**
-4. Click **1 · Sync roster**
+4. Under **1 · Match students to the roster**, click **Sync roster**
 
 **Expected result:** a count of how many submissions were matched, and a list of any that were not.
 
@@ -145,7 +151,7 @@ Do this if you ever think the token has been seen by someone else.
 | *Could not reach Canvas* | The address is wrong, or you are off the university network | Check the address has no `/courses/...` on the end. Try opening it in a browser |
 | *Connected as* somebody else | Token copied from another Canvas account | Make a token while signed in as yourself |
 | The course list is empty | The token has no teacher role in any course | Check you are a teacher, not an observer, in Canvas |
-| *This course has no Canvas course ID* | Step 3 not done | Add the number from the Canvas address bar |
+| *Tell AutoGrade which Canvas course and assignment* | Step 3 not done | Fill in the two boxes underneath and click **Save Canvas IDs** |
 | Push says *skipped: not finalized* | Those grades are not approved yet | Approve them under **4 · Review results** |
 | Push says *skipped: no Canvas student* | The roster sync could not match that student | Correct the student's name or email, sync the roster again |
 

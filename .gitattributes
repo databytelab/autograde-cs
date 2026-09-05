@@ -20,3 +20,7 @@ Caddyfile       text eol=lf
 
 # Let git decide for everything else.
 *               text=auto
+
+# Development-only files, kept out of the ZIP a professor receives.
+.github/            export-ignore
+frontend/           export-ignore

@@ -10,13 +10,15 @@ AutoGrade needs one AI account to read submissions and propose grades. You set t
 | Setup time | 10 minutes | 10 minutes | 30 minutes |
 | Needs a card | Yes | Yes | No |
 | Student work leaves your computer | Yes, to OpenAI | Yes, to Anthropic | **No** |
-| Grading speed (30 students) | 10–20 minutes | 10–20 minutes | 30–90 minutes |
-| Quality of grading | Best | Best | Good, and more lenient |
+| Grading speed (30 students) | 10–20 minutes | 10–20 minutes | 1–3 hours |
+| Quality of grading | Reliable | Reliable | **Test it first** — see the warning in Option 3 |
 | Needs a powerful computer | No | No | Yes — 8 GB of free memory |
 
 **If you are not sure, choose OpenAI.** It is the quickest to get working, and a whole class costs less than a coffee. You can change your mind later, and you can set up more than one.
 
-**Choose Ollama** if your department requires that student work never leaves the machine, or if you would rather not pay per use.
+**Choose Ollama** if your department requires that student work never
+leaves the machine, or if you would rather not pay per use — but read the
+warning at the top of Option 3 before you rely on it for real marking.
 
 ---
 

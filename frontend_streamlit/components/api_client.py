@@ -224,6 +224,10 @@ def create_assignment(payload: dict):
     return api_call("POST", "/api/assignments", json=payload, timeout=300)
 
 
+def update_course(course_id: str, payload: dict):
+    return api_call("PATCH", f"/api/courses/{course_id}", json=payload)
+
+
 def update_assignment(assignment_id: str, payload: dict):
     return api_call("PATCH", f"/api/assignments/{assignment_id}", json=payload)
 

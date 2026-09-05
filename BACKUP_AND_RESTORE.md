@@ -8,7 +8,12 @@ Reading this takes five minutes. Doing it takes two.
 
 ## What is already happening
 
-While AutoGrade is running, it saves a copy of the gradebook **every 24 hours** into the `backups` folder inside your AutoGrade folder, and keeps the last 30 days.
+While AutoGrade is running, it saves a copy **every 24 hours** into the
+`backups` folder inside your AutoGrade folder, and keeps the last 30 days.
+
+Each automatic backup writes the same two files the **Backup AutoGrade**
+button does — the gradebook and the student files — so restoring one
+brings everything back.
 
 That protects you from a mistake — deleting a course, a bad grade import. **It does not protect you from losing the computer**, because the copy is on the same disk.
 

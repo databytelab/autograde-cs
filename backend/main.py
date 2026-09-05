@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from backend.ai.grader import GradingError
 from backend.config import settings
+from backend.version import APP_VERSION
 from backend.parsers.base import ParseError
 from backend.routers import (
     assignments, auth, courses, export, results, settings_providers, submissions,
@@ -55,7 +56,7 @@ app = FastAPI(
         "a rubric with Claude, review and override the results, then export "
         "to CSV, Excel, PDF, or Canvas."
     ),
-    version="1.0.0",
+    version=APP_VERSION,
 )
 
 app.add_middleware(
@@ -226,7 +227,7 @@ async def health(response: Response) -> dict:
     key = settings.anthropic_api_key
     return {
         "status": "ok" if database_ok else "degraded",
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "environment": settings.environment,
         "database_ok": database_ok,
         "llm_provider": settings.active_provider(),

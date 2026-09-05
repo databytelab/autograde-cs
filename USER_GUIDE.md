@@ -161,6 +161,7 @@ To stop early, click **Cancel this run**. Grades already produced are kept.
 | Incomplete | A section is missing or left as a stub |
 | Possibly AI-generated | Style markers suggest generated code |
 | **Tried to instruct the grader** | The submission contained text aimed at the AI — **read this one yourself** |
+| **The AI ignored your rubric** | The AI answered about criteria it invented, so every score is zero. **Not a judgement of the student.** Usually a local model that is not strong enough — see [AI_PROVIDERS.md](AI_PROVIDERS.md) |
 
 ---
 
@@ -195,6 +196,12 @@ Both numbers are kept — the AI's and yours.
 - Click **Approve** to lock the grade in
 
 Work down the list. Start with anything flagged.
+
+Changed your mind after approving? Open that student again and click
+**Un-approve**, make the change, then approve again.
+
+To see exactly what the AI returned before AutoGrade checked it, switch on
+**Show the raw model output (audit trail)** inside a student's panel.
 
 ### Check for copying
 

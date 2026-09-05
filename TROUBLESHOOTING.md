@@ -64,9 +64,9 @@ Something else on your computer is using the same door. AutoGrade normally moves
 
 ### The browser did not open
 
-Open it yourself and go to **<http://localhost:8501>**.
-
-If the address bar shows a different port in the Start window, use that number instead.
+Open it yourself and go to the address the **Start AutoGrade** window
+printed — normally **<http://localhost:8501>**, sometimes 8502 or higher
+if another program was using that door.
 
 ### "This site can't be reached"
 
@@ -77,7 +77,14 @@ AutoGrade is not running. Double-click **Start AutoGrade** and wait for it to sa
 There is no reset email — AutoGrade does not send email.
 
 - **If you have a colleague's account on this AutoGrade with administrator rights**, ask them to reset it under **Settings → Account → People**.
-- **If it is your own single-user installation**, you can reset it yourself. Open PowerShell in your AutoGrade folder, change `choose-a-new-password` below to what you want, and run it as one line:
+- **If it is your own single-user installation**, you can reset it yourself.
+
+  To open PowerShell in the right place: open your AutoGrade folder in File
+  Explorer, click once in the address bar at the top, type `powershell`, and
+  press **Enter**. A blue window opens, already in that folder.
+
+  Then change `choose-a-new-password` below to the password you want, and
+  paste the whole thing in as one line:
 
 ```bash
 docker compose -f docker-compose.local.yml exec api python -c "from backend.database import SessionLocal; from backend.models.user import User; from backend.utils.auth_utils import hash_password; db=SessionLocal(); u=db.query(User).filter(User.is_admin==True).order_by(User.id).first(); u.password_hash=hash_password('choose-a-new-password'); db.commit(); print('Reset', u.email)"

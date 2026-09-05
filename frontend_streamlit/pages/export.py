@@ -135,13 +135,43 @@ else:
     else:
         st.caption(f"Connected to {canvas.get('base_url')}")
 
-    if not course.get("canvas_course_id"):
-        st.warning(
-            "This course has no Canvas course ID. Add one when you create "
-            "the course, or edit it via the API."
-        )
-    elif not assignment.get("canvas_assignment_id"):
-        st.warning("This assignment has no Canvas assignment ID.")
+    # These used to be dead-end warnings - one of them told a professor to
+    # "edit it via the API", for a value the interface could only set while
+    # the course was being created. Anyone who connected Canvas after making
+    # their course had no way forward but to delete and recreate it.
+    if not course.get("canvas_course_id") or not assignment.get("canvas_assignment_id"):
+        st.warning("Tell AutoGrade which Canvas course and assignment to "
+                   "write into. Both numbers are in the Canvas web address.")
+        with st.form("canvas_link"):
+            st.caption(
+                "Open the course in Canvas and read the number after "
+                "`/courses/`; open the assignment and read the number after "
+                "`/assignments/`. See CANVAS.md."
+            )
+            columns = st.columns(2)
+            course_id_in = columns[0].text_input(
+                "Canvas course ID", value=course.get("canvas_course_id") or "",
+                placeholder="12345",
+            )
+            assignment_id_in = columns[1].text_input(
+                "Canvas assignment ID",
+                value=assignment.get("canvas_assignment_id") or "",
+                placeholder="67890",
+            )
+            if st.form_submit_button("Save Canvas IDs", type="primary"):
+                ok = True
+                if course_id_in.strip() != (course.get("canvas_course_id") or ""):
+                    ok = bool(api_client.update_course(
+                        course["id"],
+                        {"canvas_course_id": course_id_in.strip() or None}))
+                if ok and assignment_id_in.strip() != (
+                        assignment.get("canvas_assignment_id") or ""):
+                    ok = bool(api_client.update_assignment(
+                        assignment["id"],
+                        {"canvas_assignment_id": assignment_id_in.strip() or None}))
+                if ok:
+                    st.success("Saved.")
+                    st.rerun()
     else:
         step_one, step_two = st.columns(2)
 
