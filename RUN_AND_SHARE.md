@@ -556,3 +556,133 @@ Honest list of what is not there yet:
 * **Small local models are lenient.** Spot-check before trusting them.
 * **Uploads live on one machine's disk.** Fine for one server; object
   storage would be needed to run two.
+
+---
+
+## 13. Release checklist
+
+Work down this list once. Tick every box before you send anyone a link.
+
+**Server**
+
+- [ ] Ports 80 and 443 are free — or the override in §10 applied
+- [ ] `git checkout v0.9.1-pilot`
+- [ ] `.env` created from `.env.example`, then `chmod 600 .env`
+- [ ] `ENVIRONMENT=production`
+- [ ] `SECRET_KEY` generated (48+ random chars), **not** the placeholder
+- [ ] `CREDENTIAL_ENCRYPTION_KEY` set to its own value, so a future
+      `SECRET_KEY` rotation does not destroy professors' saved keys
+- [ ] `POSTGRES_PASSWORD` generated, and matching inside `DATABASE_URL`
+- [ ] `DATABASE_URL` points at PostgreSQL, not SQLite
+- [ ] `PUBLIC_HOSTNAME` is a real DNS name your colleagues can resolve
+- [ ] `ACME_EMAIL` set, so certificate-expiry warnings reach a human
+- [ ] `CORS_ORIGINS` is your public URL
+- [ ] AI provider configured and working (§9)
+
+**Start and verify**
+
+- [ ] `docker compose -f docker-compose.prod.yml up -d --build`
+- [ ] `ps` shows six services; `api`, `db`, `frontend` report healthy
+- [ ] `curl https://<host>/api/health` returns 200 with `database_ok: true`
+- [ ] Sign-in page loads with a **valid** certificate (no browser warning)
+- [ ] You created **your own** account first, before sharing the URL
+- [ ] One full run: course → assignment + rubric → upload → grade →
+      review → override → approve → export
+- [ ] Grading still finishes after you close and reopen the browser
+- [ ] A second test account cannot see your course — then delete it
+
+**Operations**
+
+- [ ] `logs backup` shows a successful dump
+- [ ] **Restore drill done at least once** (§6). An untested backup is a guess
+- [ ] Off-host copy of both `backups` *and* `uploads` scheduled
+- [ ] Docker starts on boot, so a reboot brings AutoGrade back by itself
+- [ ] You know how to read and grep the logs (§5)
+
+---
+
+## 14. Inviting the first 3-5 professors
+
+Aim for one course each, one real assignment, within the first fortnight.
+
+### Before you invite anyone
+
+1. Finish §13.
+2. Grade one of **your own** past assignments end to end and read the
+   feedback. If you would not hand it to a student, fix the rubric before
+   involving colleagues.
+3. Decide who pays: your shared key (§9.1), their own keys (§9.2), or a
+   shared Ollama (§9.3). For a pilot, your shared key is simplest.
+4. Set a spend alert on the provider account if you are paying.
+
+### Create their accounts
+
+One command per colleague, run on the server:
+
+```bash
+curl -k -X POST https://localhost/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"colleague@university.edu","name":"Dr Colleague",
+       "password":"REPLACE-with-a-long-random-password","role":"professor"}'
+```
+
+Generate a distinct password for each person:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(12))"
+```
+
+Use `"role":"ta"` instead of `professor` for someone who should be able to
+grade and comment but not approve a grade or delete a course.
+
+### The message to send
+
+> Subject: **AutoGrade pilot - your login**
+>
+> Hi <name>,
+>
+> AutoGrade grades CS assignments against a rubric you write, and shows you
+> every score for review before anything is final. **It never publishes a
+> grade on its own - you approve each one.**
+>
+> Nothing to install. Open the link and sign in:
+>
+> URL: https://autograde.your-university.edu
+> Email: <their email>
+> Password: <their password>
+>
+> To try it, about 20 minutes:
+> 1. **New assignment** - create a course and an assignment, and paste your
+>    marking scheme. It turns that into a rubric you can edit.
+> 2. **Upload & grade** - upload a handful of past submissions (`.ipynb`,
+>    `.html`, `.py`, or a Canvas ZIP) and press Grade. It runs on the
+>    server, so you can close the tab and come back later.
+> 3. **Review results** - read the feedback, change any score you disagree
+>    with, then approve.
+> 4. **Export** - CSV, Excel, or a per-student PDF.
+>
+> Two things I would particularly like to hear:
+> * Where the AI's score differed from yours, and by how much.
+> * Anything in the interface you had to guess at.
+>
+> Please use last term's work rather than anything live while we pilot.
+>
+> - <you>
+
+### During the pilot
+
+- [ ] Watch spend over the first few batches
+      (`logs worker | grep grading_job`)
+- [ ] Check in after each colleague's first real batch
+- [ ] Keep a shared list of whatever they had to guess at - that is your
+      backlog
+- [ ] Review anything flagged `prompt_injection` yourself
+
+### Tell them plainly
+
+* Grades are **proposals** until they approve them.
+* Submissions are sent to the configured AI provider - say which one, and
+  that the work is not used to train models.
+* Use last term's coursework during the pilot, not live grading.
+* There is no password reset yet; they email you if they get locked out.
+* Data is backed up nightly - tell them the recovery window.
