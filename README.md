@@ -11,6 +11,15 @@ until a professor finalizes it.
 
 ---
 
+## Documentation
+
+| Read this | If you are |
+|---|---|
+| **[USER_GUIDE.md](USER_GUIDE.md)** | An instructor using AutoGrade. Click-by-click, no technical knowledge needed. |
+| **[CHOOSING_YOUR_SETUP.md](CHOOSING_YOUR_SETUP.md)** | Deciding *where* to run it. Explains where student data goes and who can read it. **Read this before sharing with colleagues.** |
+| **[RUN_AND_SHARE.md](RUN_AND_SHARE.md)** | Running the server: install, start/stop, logs, backups, upgrades, AI providers, inviting people. |
+| **[DEPLOYMENT.md](DEPLOYMENT.md)** | The architecture reference: services, volumes, ports, risks. |
+
 ## What it does
 
 - **Parses** notebooks, nbconvert HTML exports, and plain Python — cells,
