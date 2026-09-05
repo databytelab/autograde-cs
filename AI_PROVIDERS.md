@@ -114,13 +114,15 @@ An API account with no credit cannot grade anything.
 
 Nothing leaves your machine, and there is nothing to pay. In exchange it is slower, and the grades need more checking.
 
+> **Read this before you rely on it.** In our own testing on a real assignment, both `qwen2.5:3b` and `qwen2.5-coder:7b` answered about criteria they invented from the assignment text instead of the rubric. AutoGrade detects that, scores everything zero, and says so - so you cannot be given a wrong grade quietly - but the run is wasted. **Test this option on one of your own assignments before term starts.** If your rubric does not come back intact, use OpenAI or Claude for real coursework, or a larger local model on a stronger machine.
+
 ## 3a. Check your computer is up to it
 
 | Model | Free memory needed | Notes |
 |---|---|---|
-| `qwen2.5:3b` | about 4 GB | Fastest. Marks generously — check its work |
-| `qwen2.5-coder:7b` | about 8 GB | **The sensible default** |
+| `qwen2.5-coder:7b` | about 8 GB | **Start here** - but check it follows your rubric (below) |
 | `qwen2.5-coder:14b` | about 16 GB | Better, needs a strong machine |
+| `qwen2.5:3b` | about 4 GB | **Too small.** In our testing it ignored the rubric entirely and scored everything zero. Use it only to check that Ollama is wired up |
 
 To see how much memory you have: press **Ctrl+Shift+Esc**, click **Performance**, click **Memory**. You want at least 16 GB total to run the 7b model comfortably alongside everything else.
 
@@ -178,9 +180,11 @@ Put that computer's address in instead, for example `http://192.168.1.20:11434/v
 
 ### Check the grades before you trust them
 
-Small local models are noticeably more generous than the hosted ones. In our own testing, `qwen2.5:3b` gave full marks to a submission that both hosted models marked down.
+Local models are less reliable than the hosted ones, in two ways worth knowing about.
 
-Grade five submissions you have already marked yourself, and compare. If the scores are consistently too high, use a larger model or switch to OpenAI for real coursework.
+**They mark generously.** Grade five submissions you have already marked yourself and compare. If the scores are consistently too high, use a larger model.
+
+**They may ignore the rubric altogether.** A local model that is not strong enough answers about criteria it made up rather than yours. AutoGrade catches this: every criterion is scored zero and the result is flagged *The AI ignored your rubric - not a real grade*, with an explanation on the grade itself. Nothing wrong can reach a student. But the fix is a better model, not another run - and in our testing `qwen2.5-coder:7b` was not reliably good enough on a real data-science lab. Check on your own assignment first.
 
 ---
 

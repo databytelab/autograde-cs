@@ -270,11 +270,16 @@ def test_credential(db: Session, user: User, provider: str) -> ProviderCredentia
         raise CredentialError(f"No saved credentials for '{provider}'.")
 
     api_key = _decrypt(credential.encrypted_key) if credential.encrypted_key else ""
-    built = _provider_from(credential.provider, api_key,
-                           credential.base_url, credential.model)
 
     ok, detail = True, "Connected."
     try:
+        # Building the provider is inside the try on purpose. It used to sit
+        # outside, so a provider that could not be constructed at all raised
+        # straight past this function and reached the professor as a bare
+        # HTTP 500 - from the one button whose entire job is to explain what
+        # is wrong with their credentials.
+        built = _provider_from(credential.provider, api_key,
+                               credential.base_url, credential.model)
         # The smallest possible round-trip that proves credentials, network
         # and model name are all right.
         result, _usage = built.complete_json(

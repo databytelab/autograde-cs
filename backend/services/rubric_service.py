@@ -208,7 +208,8 @@ def rubric_summary(rubric: dict[str, Any]) -> str:
 
 
 # -- Free-text rubrics -------------------------------------------------
-def parse_rubric_text(text: str, total_points: float | None = None) -> dict[str, Any]:
+def parse_rubric_text(text: str, total_points: float | None = None,
+                      provider: Any = None) -> dict[str, Any]:
     """
     Turn a professor's pasted assignment text into a validated rubric.
 
@@ -234,7 +235,8 @@ def parse_rubric_text(text: str, total_points: float | None = None) -> dict[str,
     # 2. Ask Claude.
     from backend.ai.grader import extract_rubric_from_text  # local import on purpose
 
-    extracted = extract_rubric_from_text(stripped, total_points=total_points)
+    extracted = extract_rubric_from_text(stripped, total_points=total_points,
+                                         provider=provider)
     return validate_rubric(extracted)
 
 
@@ -284,6 +286,7 @@ def _scale_criteria_to_total(rubric: dict[str, Any], target: float) -> dict[str,
 def build_rubric_from_solution(
     parsed: dict[str, Any],
     total_points: float | None = None,
+    provider: Any = None,
 ) -> dict[str, Any]:
     """
     Turn a parsed instructor solution into a validated rubric.
@@ -296,7 +299,8 @@ def build_rubric_from_solution(
     """
     from backend.ai.grader import extract_rubric_from_solution  # local import
 
-    extracted = extract_rubric_from_solution(parsed, total_points=total_points)
+    extracted = extract_rubric_from_solution(parsed, total_points=total_points,
+                                             provider=provider)
     if total_points:
         extracted = _scale_criteria_to_total(extracted, total_points)
     return validate_rubric(extracted)

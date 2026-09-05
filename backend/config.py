@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # behaviour is visible and tunable.
     llm_timeout_seconds: float = 120.0
     llm_max_retries: int = 3
+    # A local model runs on the professor's own machine. A 7B model without
+    # a graphics card can take five minutes on one submission, so the
+    # hosted-API timeout above fails every local run before it finishes.
+    local_timeout_seconds: float = 900.0
 
     # ── Database ──────────────────────────────────────────────
     # SQLite for local dev, PostgreSQL for production

@@ -164,6 +164,21 @@ def build_grading_user_prompt(
         ensure_ascii=False,
     ))
 
+    # Spelling the ids out again, in a list, outside the JSON. Smaller local
+    # models read the rubric, then answer about criteria they invented from
+    # the assignment's own headings - a schema-valid reply in which nothing
+    # matches, so every criterion falls to zero. Restating the ids as an
+    # explicit closed set is what makes them comply.
+    ids = [str(c.get("id")) for c in rubric.get("criteria", []) if c.get("id")]
+    if ids:
+        parts.append(
+            "\n\n## The exact criteria to return\n"
+            f"Return exactly {len(ids)} entries in `criteria_results`, one for "
+            "each id below, using these ids verbatim. Do not rename them, do "
+            "not add others, do not derive your own from the assignment text:\n"
+            + "\n".join(f"- {cid}" for cid in ids)
+        )
+
     if expected_solution:
         parts.append(
             "\n\n# Instructor reference solution\n"

@@ -296,7 +296,7 @@ def test_auth_error_is_translated(mock_claude, rubric, parsed):
     fake.raises = anthropic.AuthenticationError(
         "401", response=_fake_httpx_response(401), body=None
     )
-    with pytest.raises(GradingError, match="rejected the API key"):
+    with pytest.raises(GradingError, match="rejected this API key"):
         grade_submission(parsed=parsed, rubric=rubric, assignment_name="HW3")
 
 
@@ -381,3 +381,73 @@ def test_extract_rubric_from_solution_reads_the_solution(mock_claude, parsed):
     assert call["system"][0]["text"] == prompts.RUBRIC_FROM_SOLUTION_SYSTEM
     prompt = next(b["text"] for b in call["messages"][0]["content"] if b["type"] == "text")
     assert "worked solution" in prompt.lower()
+
+
+# ---------------------------------------------------------------------
+# A model that answers about criteria of its own invention
+# ---------------------------------------------------------------------
+def test_a_model_that_invents_its_own_criteria_is_called_out(rubric):
+    """
+    Small local models return a schema-valid response whose criterion ids
+    are made up, so nothing matches the rubric and every criterion falls to
+    zero. The clamping is right; handing a professor a silent 0/100 is not.
+    """
+    from backend.ai.grader import normalize_grade
+
+    invented = {
+        "criteria_results": [
+            {"criterion_id": "1", "name": "Something else", "score": 2,
+             "max_score": 2, "reasoning": "Looks fine.", "feedback": "Good."},
+            {"criterion_id": "2", "name": "Another thing", "score": 2,
+             "max_score": 2, "reasoning": "Fine too.", "feedback": "Good."},
+        ],
+        "summary_feedback": "Strong work overall.",
+    }
+    result = normalize_grade(invented, rubric)
+
+    assert result["total_score"] == 0.0
+    assert "rubric_ignored" in result["flags"]
+    assert "criteria of its own" in result["summary_feedback"]
+    assert "does not reflect" in result["summary_feedback"] or            "reflects the student" in result["summary_feedback"]
+
+
+def test_a_partial_answer_is_not_treated_as_ignoring_the_rubric(rubric):
+    """One matching criterion means the model understood the rubric."""
+    from backend.ai.grader import normalize_grade
+
+    first = rubric["criteria"][0]
+    partial = {
+        "criteria_results": [
+            {"criterion_id": first["id"], "name": first["name"],
+             "score": first["max_points"], "max_score": first["max_points"],
+             "reasoning": "Correct.", "feedback": "Well done."},
+            {"criterion_id": "invented", "name": "Made up", "score": 5,
+             "max_score": 5, "reasoning": "", "feedback": ""},
+        ],
+        "summary_feedback": "Mostly good.",
+    }
+    result = normalize_grade(partial, rubric)
+
+    assert "rubric_ignored" not in result["flags"]
+    assert result["total_score"] == first["max_points"]
+    assert result["summary_feedback"] == "Mostly good."
+
+
+def test_the_prompt_names_every_criterion_id_outside_the_json(rubric, parsed):
+    """
+    Smaller local models read the rubric JSON and then answer about criteria
+    they invented from the assignment's own headings. Restating the ids as
+    an explicit closed set is what makes them comply.
+    """
+    from backend.ai import prompts
+
+    prompt = prompts.build_grading_user_prompt(
+        assignment_name="HW", assignment_description=None,
+        rubric=rubric, parsed=parsed)
+
+    listing = prompt.split("## The exact criteria to return", 1)
+    assert len(listing) == 2, "the id list is missing from the prompt"
+    tail = listing[1]
+    for criterion in rubric["criteria"]:
+        assert f"- {criterion['id']}" in tail
+    assert str(len(rubric["criteria"])) in tail

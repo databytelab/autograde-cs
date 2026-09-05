@@ -15,6 +15,7 @@
 set -eu
 
 BACKUP_DIR=/backups
+UPLOAD_DIR=/uploads
 INTERVAL_HOURS="${BACKUP_INTERVAL_HOURS:-24}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 
@@ -37,14 +38,32 @@ while true; do
         # usable one by the retention sweep or by a panicking operator.
         mv "$TARGET.partial" "$TARGET"
         log "wrote $(basename "$TARGET") ($(du -h "$TARGET" | cut -f1))"
+
+        # Student files live outside the database. A dump on its own restores
+        # a gradebook whose submissions have all vanished, so the archive is
+        # written beside it under the same name - which is also how Restore
+        # finds it. Automatic backups used to skip this, so the newest backup
+        # in the list, the one a professor would naturally pick, was the one
+        # that could not bring their students' files back.
+        if [ -d "$UPLOAD_DIR" ]; then
+            FILES="${BACKUP_DIR}/autograde-${STAMP}-files.tgz"
+            if tar czf "$FILES.partial" -C "$UPLOAD_DIR" . 2>/tmp/err; then
+                mv "$FILES.partial" "$FILES"
+                log "wrote $(basename "$FILES") ($(du -h "$FILES" | cut -f1))"
+            else
+                rm -f "$FILES.partial"
+                log "FILE ARCHIVE FAILED: $(tr -d '\n' < /tmp/err | head -c 200)"
+            fi
+        fi
     else
         rm -f "$TARGET.partial"
         log "BACKUP FAILED: $(tr -d '\n' < /tmp/err | head -c 300)"
     fi
 
-    DELETED=$(find "$BACKUP_DIR" -name 'autograde-*.dump' -type f \
+    DELETED=$(find "$BACKUP_DIR" \( -name 'autograde-*.dump' -o \
+        -name 'autograde-*-files.tgz' \) -type f \
         -mtime "+${RETENTION_DAYS}" -print -delete | wc -l)
-    [ "$DELETED" -gt 0 ] && log "pruned ${DELETED} dump(s) older than ${RETENTION_DAYS}d"
+    [ "$DELETED" -gt 0 ] && log "pruned ${DELETED} file(s) older than ${RETENTION_DAYS}d"
 
     sleep "$((INTERVAL_HOURS * 3600))"
 done

@@ -128,6 +128,9 @@ services:
     volumes:
       - ./docker/backup.sh:/usr/local/bin/backup.sh:ro
       - ./backups:/backups
+      # Read-only: the automatic backup archives the student files beside
+      # each dump, so a restore brings the submissions back too.
+      - uploads:/uploads:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
     depends_on:
       db:

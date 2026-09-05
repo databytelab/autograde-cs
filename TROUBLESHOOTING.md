@@ -141,6 +141,12 @@ Add credit at <https://platform.openai.com/billing> or <https://console.anthropi
 
 You can close the browser. Grading continues on your computer and you can come back to it.
 
+### Every grade came back as zero, with a warning about the rubric
+
+The AI answered about criteria it invented instead of the ones in your rubric, so none of its scores could be used. **The zeros are not a judgement of your students** - the grade says so itself.
+
+This happens with local Ollama models that are not strong enough. Use a larger model, or switch to OpenAI or Claude under **Settings → AI providers** and grade again. See [AI_PROVIDERS.md](AI_PROVIDERS.md).
+
 ### The grades look too generous
 
 If you are using a local model, that is the known weakness — small models mark kindly. Try a larger one (`qwen2.5-coder:14b`) or use OpenAI for real coursework.

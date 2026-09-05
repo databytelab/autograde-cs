@@ -167,8 +167,11 @@ MAX_REQUEST_BODY_MB=300
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
 "@
-    # UTF-8 without a BOM: Docker will not parse a BOM in an env file.
-    [IO.File]::WriteAllText("$Root\.env", $content,
+    # UTF-8 without a BOM, and Unix line endings. Docker copes with a
+    # stray carriage return in an env file, but not every tool that will
+    # ever read this one does, and a value that silently gains a "\r" is a
+    # miserable thing to debug.
+    [IO.File]::WriteAllText("$Root\.env", ($content -replace "`r`n", "`n"),
                             (New-Object Text.UTF8Encoding $false))
     OK "Settings written"
 }

@@ -181,9 +181,30 @@ def normalize_grade(
     total = round(total, 2)
     percentage = round(total / total_possible * 100, 2) if total_possible else 0.0
 
+    # A model that answered, but about criteria of its own invention. Small
+    # local models do this: the response is schema-valid, every criterion_id
+    # is made up, so nothing matches and every criterion falls to zero. That
+    # is the clamping working, but "everything scored 0" is not a useful
+    # thing to hand a professor without saying why - the score is not a
+    # judgement of the student at all.
+    rubric_criteria = rubric.get("criteria", [])
+    returned = len(by_id)
+    if rubric_criteria and returned and not (
+            by_id.keys() & {c["id"] for c in rubric_criteria}):
+        flags.add("rubric_ignored")
+        summary = (
+            f"The grader replied about {returned} criteria of its own rather "
+            f"than the {len(rubric_criteria)} in your rubric, so none of its "
+            "scores could be used and everything below is zero. This is "
+            "almost always a model that is too small to follow a rubric - "
+            "try a larger one under Settings, AI providers. Nothing here "
+            "reflects the student's work."
+        )
+        ai_output = {**ai_output, "summary_feedback": summary}
+
     # Criterion-level flags that matter at the submission level.
     unknown = {f for f in flags if f not in _KNOWN_FLAGS and f not in
-               ("grader_error", "score_clamped")}
+               ("grader_error", "score_clamped", "rubric_ignored")}
     if unknown:
         logger.info("Grader produced non-standard flags: %s", sorted(unknown))
 
@@ -268,14 +289,19 @@ def grade_submission(
 def extract_rubric_from_text(
     text: str,
     total_points: float | None = None,
+    provider: Any = None,
 ) -> dict[str, Any]:
     """
     Ask the model to turn a prose assignment description into rubric JSON.
 
     Returns the RAW extracted dict - the caller is expected to run it through
     `rubric_service.validate_rubric`.
+
+    `provider` is the professor's own, when they have one. Without it this
+    used the server-wide account, so a professor whose only credentials were
+    their own could not build a rubric at all - the first thing they do.
     """
-    ai_output, _usage = get_provider().complete_json(
+    ai_output, _usage = (provider or get_provider()).complete_json(
         system=prompts.RUBRIC_EXTRACTION_SYSTEM,
         user_prompt=prompts.build_rubric_extraction_prompt(text, total_points),
         schema=prompts.RUBRIC_RESPONSE_SCHEMA,
@@ -288,6 +314,7 @@ def extract_rubric_from_text(
 def extract_rubric_from_solution(
     parsed: dict[str, Any],
     total_points: float | None = None,
+    provider: Any = None,
 ) -> dict[str, Any]:
     """
     Ask the model to build a rubric from an instructor's *worked solution*.
@@ -297,7 +324,7 @@ def extract_rubric_from_solution(
     match - students implement differently and their output legitimately
     varies. Returns the RAW extracted dict; the caller validates it.
     """
-    ai_output, _usage = get_provider().complete_json(
+    ai_output, _usage = (provider or get_provider()).complete_json(
         system=prompts.RUBRIC_FROM_SOLUTION_SYSTEM,
         user_prompt=prompts.build_rubric_from_solution_prompt(parsed, total_points),
         schema=prompts.RUBRIC_RESPONSE_SCHEMA,

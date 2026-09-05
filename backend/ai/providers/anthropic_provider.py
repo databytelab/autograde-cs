@@ -24,10 +24,48 @@ MAX_TOKENS = 16_000
 class AnthropicProvider(LLMProvider):
     name = "anthropic"
 
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        grading_model: str | None = None,
+        rubric_model: str | None = None,
+    ) -> None:
+        """
+        Construct with no arguments for the server-wide account, which is
+        the original behaviour and what the test suite patches.
+
+        Pass an `api_key` for a professor who brought their own. Without
+        this the class took no arguments at all, so a saved Claude key
+        raised `TypeError: AnthropicProvider() takes no arguments` the
+        moment it was tested or used - the OpenAI and local providers
+        already accepted credentials, so only Claude was affected.
+        """
+        self._api_key = api_key or None
+        self._grading_model = grading_model or None
+        self._rubric_model = rubric_model or None
+        self._own_client: Any = None
+
     def _model_for(self, purpose: str) -> str:
         if purpose == "rubric":
-            return settings.anthropic_rubric_model
-        return settings.anthropic_grading_model
+            return self._rubric_model or settings.anthropic_rubric_model
+        return self._grading_model or settings.anthropic_grading_model
+
+    def _client(self) -> Any:
+        """The caller's own client, or the shared one."""
+        if self._api_key is None:
+            # Late import: grader owns the cached client, and the tests
+            # patch it there. Importing at module top would create a cycle.
+            from backend.ai import grader
+            return grader.get_client()
+
+        if self._own_client is None:
+            self._own_client = anthropic.Anthropic(
+                api_key=self._api_key,
+                timeout=settings.llm_timeout_seconds,
+                max_retries=settings.llm_max_retries,
+            )
+        return self._own_client
 
     def complete_json(
         self,
@@ -39,10 +77,6 @@ class AnthropicProvider(LLMProvider):
         effort: str = "high",
         purpose: str = "grading",
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        # Late import: grader owns the cached Anthropic client (and the tests
-        # patch it there). Importing at module top would create a cycle.
-        from backend.ai import grader
-
         content: list[dict[str, Any]] = []
         for image in images or []:
             content.append({
@@ -55,7 +89,7 @@ class AnthropicProvider(LLMProvider):
             })
         content.append({"type": "text", "text": user_prompt})
 
-        client = grader.get_client()
+        client = self._client()
         try:
             response = client.messages.create(
                 model=self._model_for(purpose),
@@ -75,7 +109,11 @@ class AnthropicProvider(LLMProvider):
                 },
             )
         except anthropic.AuthenticationError as exc:
-            raise GradingError("Anthropic rejected the API key in your .env file.") from exc
+            raise GradingError(
+                "Anthropic rejected this API key. Check it under "
+                "Settings -> AI providers, or replace it with a new one "
+                "from console.anthropic.com."
+            ) from exc
         except anthropic.RateLimitError as exc:
             raise GradingError(
                 "Anthropic rate limit reached. Wait a moment and grade again."

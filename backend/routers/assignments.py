@@ -103,7 +103,8 @@ def create_assignment(
             rubric = validate_rubric(payload.rubric_json)
         elif payload.rubric_raw_text:
             rubric = parse_rubric_text(
-                payload.rubric_raw_text, payload.total_possible_points
+                payload.rubric_raw_text, payload.total_possible_points,
+                provider=_provider_for(db, current_user),
             )
         else:
             rubric = build_default_rubric(payload.total_possible_points)
@@ -190,17 +191,41 @@ def delete_assignment(
 # ---------------------------------------------------------------------
 # Rubrics
 # ---------------------------------------------------------------------
+def _provider_for(db: Session, user: User):
+    """
+    The AI this professor grades with, for the rubric calls too.
+
+    Rubric generation used the server-wide provider. On an installation
+    where the only credentials are the professor's own - which is every
+    single-professor install - building a rubric failed with "OPENAI_API_KEY
+    is not set ... see .env.example", at the first step of the first
+    assignment. A provider that cannot be resolved falls back to the
+    server-wide one rather than breaking the request.
+    """
+    from backend.services.credential_service import resolve_provider_for_user
+
+    try:
+        return resolve_provider_for_user(db, user)
+    except Exception:  # noqa: BLE001 - fall back, never fail the request here
+        return None
+
+
 @router.post("/rubric/preview", tags=["rubrics"])
 def preview_rubric(payload: RubricPreviewRequest,
-                   _user: User = Depends(get_current_user)) -> dict:
+                   db: Session = Depends(get_db),
+                   current_user: User = Depends(get_current_user)) -> dict:
     """
     Turn assignment prose into a rubric without saving anything.
 
     Lets a professor iterate on the wording until the extracted criteria
     look right, then create the assignment with the result.
+
+    Uses this professor's own AI credentials when they have them, the same
+    as grading does.
     """
     try:
-        return parse_rubric_text(payload.text, payload.total_points)
+        return parse_rubric_text(payload.text, payload.total_points,
+                                 provider=_provider_for(db, current_user))
     except RubricError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
@@ -215,7 +240,8 @@ def preview_rubric(payload: RubricPreviewRequest,
 def rubric_from_solution(
     file: UploadFile = File(...),
     total_points: float = Form(100.0),
-    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """
     Build a rubric from an uploaded instructor solution (.ipynb / .html / .py).
@@ -241,7 +267,9 @@ def rubric_from_solution(
 
     try:
         parsed = parse_submission(path)
-        rubric = build_rubric_from_solution(parsed, total_points=total_points)
+        rubric = build_rubric_from_solution(
+            parsed, total_points=total_points,
+            provider=_provider_for(db, current_user))
     except ParseError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

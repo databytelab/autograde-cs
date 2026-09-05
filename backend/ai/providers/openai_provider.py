@@ -37,7 +37,8 @@ MAX_TOKENS = 16_000
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
-def make_client(api_key: str, base_url: str | None):
+def make_client(api_key: str, base_url: str | None,
+                timeout: float | None = None):
     """
     Build an OpenAI client. Isolated in a module function so tests can patch
     it with a fake without any network access.
@@ -45,6 +46,10 @@ def make_client(api_key: str, base_url: str | None):
     Timeout and retries are set explicitly: the SDK's 600s default is long
     enough that a single stalled request holds up every submission behind it
     in a batch. The SDK retries 429s and 5xx with exponential backoff.
+
+    `timeout` overrides the configured one. A hosted API answers in seconds;
+    a 7B model on a laptop without a graphics card takes minutes, and the
+    120s that suits OpenAI made every local grading run fail.
     """
     if openai is None:
         raise GradingError(
@@ -60,7 +65,7 @@ def make_client(api_key: str, base_url: str | None):
     # development because pydantic-settings reads .env without exporting it.
     kwargs: dict[str, Any] = {
         "api_key": api_key or "not-needed",
-        "timeout": settings.llm_timeout_seconds,
+        "timeout": timeout or settings.llm_timeout_seconds,
         "max_retries": settings.llm_max_retries,
         "base_url": (base_url or "").strip() or DEFAULT_OPENAI_BASE_URL,
     }
@@ -94,10 +99,11 @@ class OpenAICompatibleProvider(LLMProvider):
                 self._api_key and not self._api_key.startswith("your_")
             ):
                 raise GradingError(
-                    "OPENAI_API_KEY is not set. Add a real key to your .env file "
-                    "before grading. See .env.example."
+                    "No OpenAI key is set up. Add one under "
+                    "Settings -> AI providers, then try again."
                 )
-            self._client = make_client(self._api_key, self._base_url)
+            self._client = make_client(self._api_key, self._base_url,
+                                       timeout=self._timeout())
         return self._client
 
     def _model_for(self, purpose: str) -> str:
@@ -187,17 +193,44 @@ class OpenAICompatibleProvider(LLMProvider):
         usage = self._usage(response)
         return extract_json(text), usage
 
+    def _timeout(self) -> float:
+        """
+        How long to wait for an answer.
+
+        A local model runs on the professor's own computer, where a single
+        submission can genuinely take several minutes. The hosted default
+        is far too short for that, so local gets its own, longer limit.
+        """
+        if self.name == "local":
+            return float(settings.local_timeout_seconds)
+        return float(settings.llm_timeout_seconds)
+
     def _create(self, client, kwargs: dict[str, Any]):
         """One call, with provider error types translated to GradingError."""
         try:
             return client.chat.completions.create(**kwargs)
         except openai.AuthenticationError as exc:
             raise GradingError(
-                f"{self.name} rejected the API key in your .env file."
+                f"{self.name} rejected this API key. Check it under "
+                "Settings -> AI providers, or replace it with a new one."
             ) from exc
         except openai.RateLimitError as exc:
             raise GradingError(
                 f"{self.name} rate limit reached. Wait a moment and grade again."
+            ) from exc
+        except openai.APITimeoutError as exc:
+            # Caught before APIConnectionError, which is its parent class.
+            # Without this, a local model that is simply slow reported
+            # "could not reach the server" and sent the professor hunting a
+            # networking problem that was not there.
+            raise GradingError(
+                f"The {self.name} model did not answer within "
+                f"{self._timeout():.0f} seconds. "
+                + ("A local model on a computer without a graphics card can "
+                   "be this slow. Try a smaller model, or raise "
+                   "LLM_TIMEOUT_SECONDS."
+                   if self.name == "local" else
+                   "The service may be overloaded - try again shortly.")
             ) from exc
         except openai.APIConnectionError as exc:
             # The most common local-model failure: the server is not running.

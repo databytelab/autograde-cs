@@ -236,7 +236,7 @@ def test_openai_auth_error_is_translated(mock_openai, rubric, parsed):
     fake.raises = openai.AuthenticationError(
         "invalid key", response=httpx2.Response(401, request=_req()), body=None
     )
-    with pytest.raises(grader.GradingError, match="rejected the API key"):
+    with pytest.raises(grader.GradingError, match="rejected this API key"):
         grader.grade_submission(parsed=parsed, rubric=rubric, assignment_name="HW3")
 
 
@@ -260,7 +260,7 @@ def test_missing_openai_key_gives_useful_error(monkeypatch, rubric, parsed):
     monkeypatch.setattr(settings, "llm_provider", "openai")
     monkeypatch.setattr(settings, "openai_api_key", "")
     reset_provider()
-    with pytest.raises(grader.GradingError, match="OPENAI_API_KEY is not set"):
+    with pytest.raises(grader.GradingError, match="Settings -> AI providers"):
         grader.grade_submission(parsed=parsed, rubric=rubric, assignment_name="HW3")
     reset_provider()
 
@@ -282,3 +282,52 @@ def test_local_provider_uses_its_model_and_needs_no_key(monkeypatch, rubric, par
     assert result["total_score"] == 89.0
     assert fake.calls[0]["model"] == "qwen2.5-coder:7b"
     reset_provider()
+
+
+# ---------------------------------------------------------------------
+# A slow local model is not an unreachable one
+# ---------------------------------------------------------------------
+def test_a_local_model_gets_a_much_longer_timeout():
+    """
+    120 seconds suits a hosted API and fails every run against a 7B model
+    on a laptop. Local grading timed out at 120s, retried, and then
+    reported "could not reach the server" - which is not what happened.
+    """
+    from backend.ai.providers.openai_provider import OpenAICompatibleProvider
+    from backend.config import settings
+
+    local = OpenAICompatibleProvider(
+        name="local", api_key="", base_url="http://host.docker.internal:11434/v1",
+        grading_model="qwen2.5-coder:7b", rubric_model="qwen2.5-coder:7b")
+    hosted = OpenAICompatibleProvider(
+        name="openai", api_key="sk-x", base_url=None,
+        grading_model="gpt-4o", rubric_model="gpt-4o-mini")
+
+    assert local._timeout() == settings.local_timeout_seconds
+    assert hosted._timeout() == settings.llm_timeout_seconds
+    assert local._timeout() > hosted._timeout()
+
+
+def test_a_timeout_says_it_timed_out(monkeypatch):
+    """Not "could not reach the server", which sends people hunting a
+    networking problem that is not there."""
+    import openai as openai_sdk
+    from backend.ai.providers.base import GradingError
+    from backend.ai.providers.openai_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        name="local", api_key="", base_url="http://host.docker.internal:11434/v1",
+        grading_model="qwen2.5-coder:7b", rubric_model="qwen2.5-coder:7b")
+
+    class Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**_kwargs):
+                    raise openai_sdk.APITimeoutError(request=None)
+
+    with pytest.raises(GradingError) as caught:
+        provider._create(Client(), {})
+    message = str(caught.value)
+    assert "did not answer within" in message
+    assert "could not reach" not in message.lower()

@@ -329,3 +329,94 @@ def test_local_discovery_lists_models(client, professor, monkeypatch):
     assert "qwen2.5-coder:7b" in body["models"]
     # The /v1 suffix is trimmed before asking Ollama's native endpoint.
     assert body["base_url"] == "http://ollama:11434/v1"
+
+
+# ---------------------------------------------------------------------
+# Bringing your own Claude key
+# ---------------------------------------------------------------------
+def test_a_personal_claude_key_builds_a_provider():
+    """
+    AnthropicProvider took no arguments, so every path that passed a
+    professor's own key - Test connection, and grading itself - died with
+    `TypeError: AnthropicProvider() takes no arguments`. OpenAI and local
+    already accepted credentials, so only Claude was broken, and only for
+    users who brought their own key.
+    """
+    from backend.services.credential_service import _provider_from
+
+    built = _provider_from("anthropic", "sk-ant-a-professors-own-key",
+                           None, "claude-sonnet-5")
+    assert built.name == "anthropic"
+    assert built._model_for("grading") == "claude-sonnet-5"
+
+
+def test_claude_without_a_personal_key_still_uses_the_shared_client():
+    """The server-wide account must keep working exactly as before."""
+    from backend.ai.providers.anthropic_provider import AnthropicProvider
+    from backend.config import settings
+
+    shared = AnthropicProvider()
+    assert shared._model_for("grading") == settings.anthropic_grading_model
+    assert shared._api_key is None
+
+
+def test_testing_an_unbuildable_credential_reports_instead_of_exploding(
+        client, db_session, professor, monkeypatch):
+    """
+    Test connection exists to explain what is wrong. A provider that
+    cannot even be constructed used to escape as an HTTP 500 from that
+    very button - the professor got "Internal Server Error" and no clue.
+    """
+    from backend.services import credential_service
+
+    client.put("/api/settings/providers", json={
+        "provider": "openai", "api_key": "sk-whatever"},
+        headers=professor["headers"])
+
+    def explode(*_args, **_kwargs):
+        raise TypeError("provider cannot be built")
+
+    monkeypatch.setattr(credential_service, "_provider_from", explode)
+    response = client.post("/api/settings/providers/openai/test",
+                           headers=professor["headers"])
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["last_test_ok"] is False
+    assert "cannot be built" in body["last_test_detail"]
+
+
+# ---------------------------------------------------------------------
+# The rubric calls have to use the same credentials as grading
+# ---------------------------------------------------------------------
+def test_building_a_rubric_uses_the_professors_own_provider(
+        client, db_session, professor, monkeypatch):
+    """
+    Rubric generation used the server-wide provider. On a single-professor
+    installation there is no server-wide provider, so the very first thing
+    they do - turn a marking scheme into a rubric - failed with a message
+    telling them to edit .env.
+    """
+    from backend.ai import grader
+
+    client.put("/api/settings/providers", json={
+        "provider": "local", "base_url": "http://my-ollama:11434/v1",
+        "model": "qwen2.5-coder:7b"}, headers=professor["headers"])
+    client.put("/api/settings/providers/preference", json={"provider": "local"},
+               headers=professor["headers"])
+
+    used = {}
+
+    def fake_extract(text, total_points=None, provider=None):
+        used["provider"] = provider
+        return {"title": "R", "total_points": 100,
+                "criteria": [{"id": "c1", "name": "Correctness",
+                              "description": "It works.", "max_points": 100}]}
+
+    monkeypatch.setattr(grader, "extract_rubric_from_text", fake_extract)
+    response = client.post("/api/assignments/rubric/preview", json={
+        "text": "Write a function (100 points).", "total_points": 100},
+        headers=professor["headers"])
+
+    assert response.status_code == 200, response.text
+    assert used["provider"] is not None, "fell back to the server-wide provider"
+    assert used["provider"].name == "local"

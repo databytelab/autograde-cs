@@ -94,6 +94,7 @@ FLAG_LABELS = {
     "output_mismatch": "Output mismatch",
     "grader_error": "Grader error - review manually",
     "score_clamped": "Score clamped to the maximum",
+    "rubric_ignored": "The AI ignored your rubric - not a real grade",
     "prompt_injection": "Tried to instruct the grader - review manually",
 }
 
