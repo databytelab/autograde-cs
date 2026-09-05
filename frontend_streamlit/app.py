@@ -18,11 +18,9 @@ from pathlib import Path
 # root has to be added before any `frontend_streamlit.*` import works.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from frontend_streamlit.components import api_client
 from frontend_streamlit.components.landing import render_landing
 from frontend_streamlit.components.ui import (
-    grading_key_hint,
-    grading_ready,
+    user_grading_status,
     page_link,
     page_setup,
     render_sidebar,
@@ -59,16 +57,15 @@ st.markdown(
 
 st.success(f"Signed in as **{user['name']}**")
 
-status = api_client.health()
-if status and not grading_ready(status):
-    key_hint = grading_key_hint(status)
-    provider = status.get("llm_provider", "the AI")
+if not user_grading_status()["ready"]:
     st.warning(
-        f"**Grading is disabled.** The {provider} backend is not configured. "
-        f"Set `{key_hint}` in your `.env` file (or switch `LLM_PROVIDER`) and "
-        "restart the server. Everything else - uploading, similarity "
-        "detection, export - works without it."
+        "**Grading is not set up yet.** Choose an AI provider and add your "
+        "key - it takes two minutes, and it is the only setup AutoGrade "
+        "needs. Everything else, including uploading and exporting, works "
+        "without it."
     )
+    page_link("pages/settings_providers.py", label="Set up AI providers",
+              icon=":material/key:")
 
 st.subheader("Where to start")
 columns = st.columns(5)

@@ -17,98 +17,143 @@ require_auth()
 
 st.title("Canvas")
 st.caption(
-    "Connect your own Canvas account so approved grades can be pushed "
-    "straight into your gradebook. Your token is yours: it is encrypted "
-    "before it is stored and no one else on this instance can see or use it."
+    "Optional. Connect Canvas and AutoGrade can put approved grades "
+    "straight into your gradebook. Without it you can still download CSV, "
+    "Excel and PDF, and upload those by hand."
 )
 
 data = api_client.canvas_settings()
 if data is None:
     st.stop()
 
+connected = bool(data["connected"])
+
 # ---------------------------------------------------------------------
-# Current state
+# Where things stand
 # ---------------------------------------------------------------------
-if data["connected"]:
+if connected:
     who = f" as **{data['canvas_user_name']}**" if data.get("canvas_user_name") else ""
     st.success(f"Connected to {data['base_url']}{who} "
                f"(token {data['masked_token']}).", icon=":material/link:")
     if data.get("last_test_ok") is False:
-        st.warning(f"Last test failed: {data.get('last_test_detail')}")
+        st.error(f"The last test failed: {data.get('last_test_detail')}",
+                 icon=":material/error:")
 elif data.get("server_fallback_available"):
     st.info(
         "You have not connected your own Canvas account, so grade pushes "
-        "use the one configured on this server. That works on a "
-        "single-instructor install; on a shared one, connect your own "
-        "account below so grades go to *your* courses.",
+        "use the one configured on this server.",
         icon=":material/info:",
     )
 else:
-    st.info("Canvas is not connected. Grades can still be exported as CSV, "
-            "Excel or PDF without it.", icon=":material/info:")
+    st.info("Canvas is not connected.", icon=":material/info:")
 
 st.divider()
 
 # ---------------------------------------------------------------------
-# Connect
+# Getting a token
 # ---------------------------------------------------------------------
-st.subheader("Connect your Canvas account")
-
-with st.expander("How do I get an access token?", expanded=not data["connected"]):
+with st.expander("Where do I get an access token?", expanded=not connected):
     st.markdown(
         """
-        1. Sign in to Canvas in another tab.
-        2. Click **Account** (your picture, top-left) → **Settings**.
-        3. Scroll to **Approved Integrations** and click
-           **+ New Access Token**.
-        4. Purpose: `AutoGrade`. Leave the expiry blank, or set a date -
-           you will need to make a new one when it expires.
-        5. Click **Generate Token**, then **copy it immediately**. Canvas
-           shows it once and never again.
-        6. Paste it below.
+        1. Open Canvas in another browser tab and sign in.
+        2. Click **Account** (your picture, top-left), then **Settings**.
+        3. Scroll down to **Approved Integrations**.
+        4. Click **+ New Access Token**.
+        5. Purpose: `AutoGrade`. Leave the expiry date blank, or set one and
+           remember to make a new token when it runs out.
+        6. Click **Generate Token**.
+        7. **Copy the token now.** Canvas shows it once and never again.
+        8. Paste it below.
 
-        The token acts as you, so treat it like a password. You can revoke
-        it from that same Canvas page at any time, which immediately stops
-        AutoGrade being able to use it.
+        The token acts as you, in every course you teach, with permission to
+        read and to change grades. Treat it like a password.
         """
     )
 
-with st.form("canvas_connection"):
-    base_url = st.text_input(
-        "Canvas URL", value=data.get("base_url") or "",
-        placeholder="https://canvas.your-university.edu",
-        help="The address you use to open Canvas, without any path after it.",
-    )
-    api_token = st.text_input(
-        "Access token", type="password",
-        placeholder="leave blank to keep the saved token"
-                    if data["connected"] else "paste the token from Canvas",
-    )
-    submitted = st.form_submit_button("Save", type="primary")
-
-if submitted:
-    if api_client.save_canvas_settings(base_url, api_token or None):
-        st.success("Saved. Use **Test connection** to confirm it works.")
-        st.rerun()
-
-if data["connected"]:
-    columns = st.columns(2)
-    if columns[0].button("Test connection"):
+# ---------------------------------------------------------------------
+# Connect
+# ---------------------------------------------------------------------
+if not connected:
+    st.subheader("Connect your Canvas account")
+    with st.form("canvas_connect"):
+        base_url = st.text_input(
+            "Canvas web address",
+            value=data.get("base_url") or "",
+            placeholder="https://canvas.your-university.edu",
+            help="The address you use to open Canvas. Nothing after the "
+                 "site name - no /courses/123.",
+        )
+        api_token = st.text_input(
+            "Access token", type="password",
+            placeholder="paste the token you copied from Canvas",
+        )
+        if st.form_submit_button("Connect", type="primary"):
+            if not base_url.strip():
+                st.error("Enter your Canvas web address.")
+            elif not api_token.strip():
+                st.error("Paste your access token.")
+            elif api_client.save_canvas_settings(base_url, api_token):
+                st.success("Saved. Testing it now would be a good idea.")
+                st.rerun()
+else:
+    # --- connected: test, correct, replace, remove --------------------
+    columns = st.columns(3)
+    if columns[0].button("Test connection", type="primary"):
         with st.spinner("Asking Canvas who this token belongs to..."):
             outcome = api_client.test_canvas_settings()
         if outcome and outcome.get("last_test_ok"):
             st.success(outcome.get("last_test_detail") or "Connected.")
             st.rerun()
         elif outcome:
-            st.error(outcome.get("last_test_detail") or "Test failed.")
-    if columns[1].button("Disconnect"):
-        if api_client.delete_canvas_settings():
-            st.success("Disconnected. Grades already pushed are unaffected.")
-            st.rerun()
+            st.error(outcome.get("last_test_detail") or "The test failed.")
+
+    with st.expander("Change the Canvas web address"):
+        st.caption("Your saved token is kept. You do not need to type it again.")
+        with st.form("canvas_url"):
+            new_url = st.text_input("Canvas web address",
+                                    value=data.get("base_url") or "")
+            if st.form_submit_button("Save address"):
+                if api_client.save_canvas_settings(new_url, None):
+                    st.success("Saved.")
+                    st.rerun()
+
+    with st.expander("Replace the token"):
+        st.caption(
+            "Use this when your token expired, when you revoked it, or when "
+            "a test says it was rejected. The old one cannot be read back."
+        )
+        with st.form("canvas_token"):
+            replacement = st.text_input("New access token", type="password")
+            if st.form_submit_button("Replace token"):
+                if not replacement.strip():
+                    st.error("Paste the new token first.")
+                elif api_client.save_canvas_settings(
+                        data.get("base_url") or "", replacement):
+                    st.success("Replaced. Test it to be sure.")
+                    st.rerun()
+
+    with st.expander("Remove this connection"):
+        st.caption(
+            "AutoGrade forgets your Canvas address and token. Grades already "
+            "pushed to Canvas stay where they are.\n\n"
+            "To make the token itself useless, delete it in Canvas as well: "
+            "**Account -> Settings -> Approved Integrations**, click the bin "
+            "beside `AutoGrade`."
+        )
+        if st.button("Remove connection"):
+            if api_client.delete_canvas_settings():
+                st.success("Removed.")
+                st.rerun()
 
 st.divider()
 st.caption(
-    "Once connected, set the **Canvas course ID** on your course and the "
-    "**Canvas assignment ID** on the assignment, then use **5 · Export → "
-    "Canvas** to sync your roster and push approved grades."
+    "Your token is encrypted before it is stored, shown afterwards only as "
+    "the last four characters, and never written to logs. Nobody else using "
+    "this AutoGrade can see or use it."
+)
+st.caption(
+    "Next: put the **Canvas course ID** on your course and the **Canvas "
+    "assignment ID** on the assignment - both are the numbers in the Canvas "
+    "web address - then use **5 · Export → Canvas** to sync your roster and "
+    "push approved grades."
 )

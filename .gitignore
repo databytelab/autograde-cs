@@ -57,3 +57,6 @@ node_modules/
 
 # Release smoke-test artifacts (throwaway stack)
 docker-compose.smoke.yml
+
+# Local install: backups written by Backup AutoGrade.
+backups/

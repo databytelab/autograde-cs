@@ -17,6 +17,8 @@ import os
 from typing import Any
 
 import requests
+from urllib.parse import urlencode
+
 import streamlit as st
 
 # 127.0.0.1, not "localhost", and deliberately so: on Windows "localhost"
@@ -452,7 +454,10 @@ def set_provider_preference(provider: str | None):
 
 def discover_local_models(base_url: str | None = None):
     """Which models the Ollama server *this deployment can reach* has pulled."""
-    suffix = f"?base_url={base_url}" if base_url else ""
+    # Encoded, not interpolated: an address with a query string or a stray
+    # space would otherwise be pasted straight into the URL and silently
+    # ask about something else.
+    suffix = "?" + urlencode({"base_url": base_url}) if base_url else ""
     return api_call("GET", f"/api/settings/providers/local/discover{suffix}",
                     quiet=True, timeout=15)
 

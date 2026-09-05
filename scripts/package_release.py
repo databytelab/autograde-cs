@@ -25,18 +25,40 @@ DIST = ROOT / "dist"
 # Files that must be in the bundle for it to be installable at all. If a
 # rename ever drops one of these, the customer finds out, not us.
 REQUIRED = [
-    "docker-compose.prod.yml",
-    "docker/Caddyfile",
+    # What a professor double-clicks. Without any one of these the package
+    # is not installable by the person it is for.
+    "Start AutoGrade.bat",
+    "Stop AutoGrade.bat",
+    "Restart AutoGrade.bat",
+    "Update AutoGrade.bat",
+    "Backup AutoGrade.bat",
+    "Restore AutoGrade.bat",
+    "Show AutoGrade Logs.bat",
+    "scripts/autograde.ps1",
+    "autograde.sh",
+    "docker-compose.local.yml",
+    # The guides they follow.
+    "README.md",
+    "INSTALL.md",
+    "AI_PROVIDERS.md",
+    "USER_GUIDE.md",
+    "CANVAS.md",
+    "RUN_AND_SHARE.md",
+    "BACKUP_AND_RESTORE.md",
+    "TROUBLESHOOTING.md",
+    # The application itself.
     "docker/Dockerfile.backend",
     "docker/Dockerfile.frontend",
+    "docker/entrypoint.sh",
+    "docker/backup.sh",
+    "requirements.txt",
+    "alembic.ini",
+    # The department-server path, which ships too but is not advertised.
+    "docker-compose.prod.yml",
+    "docker/Caddyfile",
     "setup.sh",
     "setup.ps1",
     ".env.example",
-    "INSTALL.md",
-    "USER_GUIDE.md",
-    "RUN_AND_SHARE.md",
-    "requirements.txt",
-    "alembic.ini",
 ]
 
 # Shapes of real credentials. Deliberately narrow: these match live keys,
@@ -151,9 +173,8 @@ def main() -> int:
 
     size_mb = target.stat().st_size / 1_000_000
     print(f"\n  {target.relative_to(ROOT)}  ({size_mb:.1f} MB, {len(names)} files)")
-    print("\n  Send this to the customer along with INSTALL.md's first line:")
-    print("  unzip it, open a terminal in the folder, run setup.sh (or "
-          "setup.ps1 on Windows).\n")
+    print("\n  Send this with one sentence:")
+    print("  unzip it, open the folder, and double-click Start AutoGrade.\n")
     return 0
 
 

@@ -1,396 +1,154 @@
 # Install AutoGrade
 
-Two ways to run it. Pick one.
+**Time needed:** about 30 minutes, most of it waiting for a download.
+**You need:** a Windows computer, and about 10 GB of free disk space.
 
-| | **Option A — Docker** | **Option B — Without Docker** |
-|---|---|---|
-| Install first | Docker Desktop | Python 3.11 |
-| Terminals to keep open | 0 | 3 |
-| Database | PostgreSQL | SQLite file |
-| Backups | Automatic, nightly | None |
-| Other people can use it | Yes | No |
-| Use it for | A real installation | Trying it on your own machine |
-
-**Option A is the one to install for real use.**
+You install one program (Docker Desktop), then double-click one file. That is the whole installation. You will not edit any settings files, type any commands, or need to understand what is running.
 
 ---
 
-# Option A — Docker
+## Step 1 — Install Docker Desktop
 
-## A1. Install Docker
+Docker is the program that runs AutoGrade. You install it once and never think about it again.
 
-### Windows
-
-1. Go to <https://docs.docker.com/get-docker/>
+1. Go to **<https://docs.docker.com/get-docker/>**
 2. Click **Docker Desktop for Windows**
-3. Run the downloaded installer
-4. Keep every default. Click **OK** when it asks about WSL 2
-5. Restart your computer
-6. Open **Docker Desktop** from the Start menu
-7. Wait until the whale icon in the taskbar stops animating
+3. Open the file you downloaded (`Docker Desktop Installer.exe`)
+4. Click **OK** to every question. If it asks about **WSL 2**, say yes
+5. When it finishes, **restart your computer**
+6. After restarting, open **Docker Desktop** from the Start menu
+7. Accept the licence terms. If it offers to sign in, click **Skip** — you do not need an account
+8. Wait until the whale icon at the bottom-right of your screen stops moving
 
-### macOS
+**Expected result:** the Docker Desktop window says *Engine running* at the bottom-left.
 
-1. Go to <https://docs.docker.com/get-docker/>
-2. Click **Docker Desktop for Mac**. Choose **Apple chip** or **Intel chip**
-3. Open the downloaded `.dmg` and drag Docker to **Applications**
-4. Open **Docker** from Applications
-5. Wait until the whale icon in the menu bar stops animating
+> Docker Desktop must be running for AutoGrade to work. It starts by itself when you turn your computer on.
 
-### Linux (Ubuntu / Debian)
+---
 
-```bash
-curl -fsSL https://get.docker.com | sudo sh
-```
+## Step 2 — Put AutoGrade somewhere sensible
 
-```bash
-sudo usermod -aG docker $USER
-```
+1. Find the AutoGrade ZIP file you were given
+2. Right-click it → **Extract All…**
+3. Choose a folder you will not accidentally delete — `Documents` is a good choice, the Desktop is fine too
+4. Click **Extract**
 
-Log out and log back in.
+**Expected result:** a folder named something like `autograde-v0.9.3` containing files including **Start AutoGrade**.
 
-## A2. Check Docker works
+> Do not move this folder after you start using AutoGrade. Your courses and grades live inside it.
 
-```bash
-docker --version
-```
+---
 
-```bash
-docker compose version
-```
+## Step 3 — Start AutoGrade
 
-Both must print a version number. If either fails, go back to A1.
+1. Open the AutoGrade folder
+2. Double-click **`Start AutoGrade`**
 
-## A3. Get the AutoGrade folder
+A black window opens and prints text. **The first time, this takes 5 to 10 minutes** — it is downloading and building everything AutoGrade needs. You only wait this long once; later starts take about twenty seconds.
 
-**If you were given a ZIP file:**
-
-1. Save the ZIP to your Desktop
-2. Right-click it → **Extract All** (Windows) or double-click it (macOS)
-3. You now have a folder called `autograde-<version>`
-
-**If you were given a repository address:**
-
-```bash
-git clone <the address you were given> autograde
-```
-
-## A4. Open a terminal inside that folder
-
-- **Windows** — open the folder in File Explorer, click the address bar, type `powershell`, press Enter
-- **macOS** — right-click the folder → **Services** → **New Terminal at Folder**
-- **Linux** — right-click inside the folder → **Open in Terminal**
-
-Check you are in the right place:
-
-```bash
-ls
-```
-
-You should see `docker-compose.prod.yml`, `setup.sh`, `setup.ps1` and `README.md`.
-
-## A5. Change the ports (only if 80 or 443 are taken)
-
-Skip this step unless you already run Apache, IIS, XAMPP or Skype.
-
-Create a file called `docker-compose.override.yml` in the same folder, containing exactly:
-
-```yaml
-services:
-  caddy:
-    ports: !override
-      - "8081:80"
-      - "8444:443"
-```
-
-Your web address then becomes `https://localhost:8444` instead of `https://localhost` everywhere below.
-
-## A6. Run the installer
-
-**Windows:**
-
-```bash
-.\setup.ps1
-```
-
-If Windows says *running scripts is disabled on this system*, run this once and then repeat:
-
-```bash
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-**macOS / Linux:**
-
-```bash
-chmod +x setup.sh
-```
-
-```bash
-./setup.sh
-```
-
-## A7. Answer its questions
-
-| It asks | Type this |
-|---|---|
-| Web address people will use | Press **Enter** for `localhost`, or type your server's DNS name |
-| Email for certificate warnings | Your email (only asked if you typed a DNS name) |
-| Which AI should grade? | `1` OpenAI, `2` Claude, `3` local Ollama |
-| Paste your API key | Paste it and press Enter. **Nothing appears on screen. That is normal.** |
-
-Then it builds. **The first run takes 5–10 minutes** and prints a lot of text.
-
-It finishes with:
+**Expected result:** the window ends with
 
 ```
-OK  AutoGrade is running.
+  OK   Database, grading worker and interface are all running
 
-  Open:  https://localhost
+AutoGrade is ready
+  Opening http://localhost:8501 in your browser.
 ```
 
-## A8. Open AutoGrade
+and your web browser opens AutoGrade by itself.
 
-Go to the address it printed.
+> **If Windows shows a security warning** ("Windows protected your PC"), click **More info** → **Run anyway**. This appears because the file was downloaded, not because anything is wrong.
 
-If you used `localhost`, the browser says the site is not secure. Click **Advanced** → **Proceed to localhost (unsafe)**. On a real DNS name there is no warning.
+> **If the window says Docker is not running**, it will try to start Docker Desktop for you. Wait — it can take a minute. If it gives up, open Docker Desktop from the Start menu yourself and then double-click **Start AutoGrade** again.
 
-## A9. Create your account
+---
 
-**Do this before anyone else can reach the address. The first account becomes the administrator.**
+## Step 4 — Create your account
+
+The browser is showing the AutoGrade welcome page.
 
 1. Click **Create account**
-2. Type your **name**
-3. Type your **email**
-4. Type a **password**, and write it down
-5. Click **Create account**
+2. **Full name** — your name
+3. **Email** — your university email
+4. **Password** — choose one, and **write it down**
+5. **Role** — leave it as `professor`
+6. Click **Create account**
 
-You are signed in. Self sign-up is now closed — nobody else can create their own account.
+**Expected result:** you are signed in, and you see a sidebar on the left listing *Dashboard*, *New assignment*, *Upload & grade*, *Review results*, *Export*, and *Settings*.
 
-Now go to **[USER_GUIDE.md](USER_GUIDE.md)**.
-
-## A10. Everyday commands
-
-Run these from the AutoGrade folder.
-
-Start it (after a reboot, or after stopping it):
-
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-Stop it (keeps all data):
-
-```bash
-docker compose -f docker-compose.prod.yml stop
-```
-
-See what is running:
-
-```bash
-docker compose -f docker-compose.prod.yml ps
-```
-
-Watch what it is doing (`Ctrl+C` stops watching, not the app):
-
-```bash
-docker compose -f docker-compose.prod.yml logs -f
-```
-
-**Never add `-v` to `down`.** `down -v` deletes every course, grade and uploaded file.
+> **The first account created is the administrator.** That is yours. Nobody else can create an account on your AutoGrade unless you create it for them.
+>
+> There is no "forgot password" email. If you lose this password, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 
-# Option B — Without Docker
+## Step 5 — Set up the AI
 
-For trying AutoGrade on your own machine. Not for sharing with anyone.
+AutoGrade needs one AI account to read submissions and propose grades. Until you do this, everything else works but nothing can be graded.
 
-## B1. Install Python 3.11
+1. In the sidebar, under **Settings**, click **AI providers**
+2. Follow **[AI_PROVIDERS.md](AI_PROVIDERS.md)**, which walks through all three choices:
+   - **OpenAI** — easiest, costs a few cents per class
+   - **Claude** — same idea, different company
+   - **Ollama** — free, runs on your own computer, needs 8 GB of memory
 
-1. Go to <https://www.python.org/downloads/>
-2. Download **Python 3.11**
-3. Run the installer. On Windows, tick **Add python.exe to PATH**
-
-```bash
-python --version
-```
-
-## B2. Open a terminal in the AutoGrade folder
-
-See step A4.
-
-## B3. Create the environment
-
-```bash
-python -m venv venv
-```
-
-**Windows:**
-
-```bash
-venv\Scripts\activate
-```
-
-**macOS / Linux:**
-
-```bash
-source venv/bin/activate
-```
-
-```bash
-pip install -r requirements.txt
-```
-
-## B4. Write the settings file
-
-**Windows:**
-
-```bash
-copy .env.example .env
-```
-
-**macOS / Linux:**
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` in Notepad or any text editor and set these three lines:
-
-```ini
-ENVIRONMENT=development
-LLM_PROVIDER=openai
-OPENAI_API_KEY=paste-your-key-here
-```
-
-Save and close.
-
-## B5. Create the database
-
-```bash
-alembic upgrade head
-```
-
-## B6. Start three terminals
-
-All three stay open. All three in the AutoGrade folder, with `venv` activated.
-
-**Terminal 1 — the API:**
-
-```bash
-python -m uvicorn backend.main:app --reload --port 8000
-```
-
-Wait for `Application startup complete`.
-
-**Terminal 2 — the grading worker:**
-
-```bash
-python -m backend.worker
-```
-
-It prints nothing until you grade something. That is correct. **Without this terminal, grading stays stuck on "queued".**
-
-**Terminal 3 — the interface:**
-
-```bash
-python -m streamlit run frontend_streamlit/app.py
-```
-
-## B7. Open AutoGrade
-
-Go to **http://localhost:8501**
-
-No certificate warning — there is no HTTPS in this mode.
-
-## B8. Create your account
-
-1. Click **Create account**
-2. Type your name, email and a password
-3. Click **Create account**
-
-Now go to **[USER_GUIDE.md](USER_GUIDE.md)**.
-
-## B9. Stopping and starting again
-
-Stop: press `Ctrl+C` in each of the three terminals.
-
-Start again: repeat step B6. Your data is still there.
-
-## B10. Starting over with an empty database
-
-**Windows:**
-
-```bash
-del autograde.db autograde.db-shm autograde.db-wal
-```
-
-**macOS / Linux:**
-
-```bash
-rm -f autograde.db autograde.db-shm autograde.db-wal
-```
-
-Then:
-
-```bash
-alembic upgrade head
-```
+**Expected result:** the top of the AI providers page turns green and says *Grading is set up*.
 
 ---
 
-# If something goes wrong
+## Step 6 — Grade something
 
-| What you see | What to do |
+You are finished installing. Open **[USER_GUIDE.md](USER_GUIDE.md)** and grade a handful of submissions from last term.
+
+---
+
+## Every day after this
+
+| To do this | Double-click |
 |---|---|
-| `docker: command not found` | Docker is not installed, or you did not restart after installing. See A1. |
-| `Cannot connect to the Docker daemon` | Docker Desktop is not running. Open it and wait for the whale to settle. |
-| `docker: unknown command: docker compose` | Type `docker-compose` (with a hyphen) instead of `docker compose` in every command. |
-| `running scripts is disabled` (Windows) | Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then try again. |
-| `port is already allocated` | Something else uses ports 80/443. Do step A5. |
-| Browser: *not secure* | Expected on `localhost`. Click **Advanced** → **Proceed**. |
-| `Refusing to start in environment 'production'` | A value in `.env` is missing. The message names it. |
-| Grading stays on **queued** | Option A: run `docker compose -f docker-compose.prod.yml logs worker`. Option B: you did not start Terminal 2. |
-| `Cannot reach the backend` | Option B: Terminal 1 is not running. |
-| Every submission fails *could not reach the server* | Wrong API key, or no internet. |
-| `429` when signing in | Too many wrong passwords. Wait 15 minutes. |
-| Forgot the administrator password | See **Recovering the administrator** below. |
+| Open AutoGrade | **Start AutoGrade** |
+| Close it down | **Stop AutoGrade** |
+| Fix something odd | **Restart AutoGrade** |
+| Save a copy of everything | **Backup AutoGrade** |
+| Go back to a saved copy | **Restore AutoGrade** |
+| Install a newer version | **Update AutoGrade** |
 
-## Recovering the administrator
+Full details in **[RUN_AND_SHARE.md](RUN_AND_SHARE.md)**.
 
-Only an administrator can reset passwords. If you lose that account, change `choose-a-long-new-password` in the line below and run it on the machine AutoGrade is installed on:
-
-```bash
-docker compose -f docker-compose.prod.yml exec api python -c "from backend.database import SessionLocal; from backend.models.user import User; from backend.utils.auth_utils import hash_password; db=SessionLocal(); u=db.query(User).filter(User.is_admin==True).order_by(User.id).first(); u.password_hash=hash_password('choose-a-long-new-password'); db.commit(); print('Reset', u.email)"
-```
-
-On Option B, activate the venv and run the same thing without Docker:
-
-```bash
-python -c "from backend.database import SessionLocal; from backend.models.user import User; from backend.utils.auth_utils import hash_password; db=SessionLocal(); u=db.query(User).filter(User.is_admin==True).order_by(User.id).first(); u.password_hash=hash_password('choose-a-long-new-password'); db.commit(); print('Reset', u.email)"
-```
-
-Sign in with it, then change it under **Settings → Account**.
-
-## Getting help
-
-Send these three outputs. They contain no passwords and no student work.
-
-```bash
-docker compose -f docker-compose.prod.yml ps
-```
-
-```bash
-docker compose -f docker-compose.prod.yml logs --tail 50 api worker
-```
-
-```bash
-docker --version
-```
+You can leave AutoGrade running all the time. It uses very little while idle, and it starts again by itself when you turn your computer on.
 
 ---
 
-# Next
+## Where your data is
 
-- **[USER_GUIDE.md](USER_GUIDE.md)** — how to grade, click by click
-- **[RUN_AND_SHARE.md](RUN_AND_SHARE.md)** — adding people, backups, upgrades
-- **[CHOOSING_YOUR_SETUP.md](CHOOSING_YOUR_SETUP.md)** — where to run it, and who can read the data
+Everything stays on your computer:
+
+- **Your courses, rubrics and grades** — in a database inside Docker on this machine
+- **Student files you upload** — the same
+- **Your API key and Canvas token** — encrypted, on this machine
+- **Backups** — in the `backups` folder inside the AutoGrade folder
+
+The one thing that leaves your computer is the **text of each submission**, sent to whichever AI provider you chose so that it can be graded. OpenAI and Anthropic both state that data sent through their APIs is not used to train their models. If you would rather nothing at all left your computer, use **Ollama** — see [AI_PROVIDERS.md](AI_PROVIDERS.md).
+
+Nobody who gave you this package can see any of it.
+
+---
+
+## If something went wrong
+
+Every common problem and its fix is in **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
+
+---
+
+## Installing on a Mac or on Linux
+
+The same steps work, with two differences:
+
+- In step 1, choose **Docker Desktop for Mac** (Apple chip or Intel chip) or install Docker Engine on Linux
+- In step 3, instead of double-clicking `Start AutoGrade`, open a terminal in the AutoGrade folder and run:
+
+```bash
+./autograde.sh start
+```
+
+Everything after that is identical. `./autograde.sh stop`, `restart`, `update`, `backup` and `restore` match the Windows buttons.

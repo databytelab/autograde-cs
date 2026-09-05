@@ -1,10 +1,11 @@
 # Docker
 
-Two compose files.
+Three compose files.
 
 | File | For | Guide |
 |---|---|---|
-| `docker-compose.prod.yml` | A real installation | [INSTALL.md](../INSTALL.md) |
+| `docker-compose.local.yml` | **What a professor installs** - one computer | [INSTALL.md](../INSTALL.md) |
+| `docker-compose.prod.yml` | A department server for many people | [DEPLOYMENT.md](../docs/developer/DEPLOYMENT.md) |
 | `docker-compose.yml` | Working on the code | this file |
 
 Two images, both built from the repository root:

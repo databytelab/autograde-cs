@@ -18,7 +18,7 @@ from frontend_streamlit.components.ui import (
     assignment_selector,
     course_selector,
     flag_chips,
-    grading_ready,
+    user_grading_status,
     page_setup,
     require_auth,
 )
@@ -37,8 +37,7 @@ if assignment is None:
     page_link("pages/new_assignment.py", label="Create an assignment", icon=":material/note_add:")
     st.stop()
 
-health = api_client.health() or {}
-grading_available = grading_ready(health)
+grading_available = user_grading_status()["ready"]
 
 st.divider()
 
@@ -155,9 +154,12 @@ ungraded = [s for s in submissions if s["status"] in ("pending", "error")]
 
 if not grading_available:
     st.error(
-        "Grading is unavailable: the backend has no Anthropic API key. "
-        "Add `ANTHROPIC_API_KEY=...` to `.env` and restart the server."
+        "**No AI provider is set up yet**, so there is nothing to grade "
+        "with. Your files are safely uploaded - set a provider up and come "
+        "straight back to this page."
     )
+    page_link("pages/settings_providers.py", label="Set up AI providers",
+              icon=":material/key:")
 else:
     columns = st.columns([2, 2, 3])
     regrade = columns[0].checkbox(

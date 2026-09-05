@@ -186,14 +186,6 @@ class Settings(BaseSettings):
         elif self._is_placeholder(self.database_url):
             problems.append("DATABASE_URL still holds a placeholder value.")
 
-        # The provider that will actually be used must be configured, and
-        # not with the example placeholder.
-        if not self.grading_configured():
-            problems.append(
-                f"The '{self.active_provider()}' provider has no usable "
-                "credentials, so grading would fail for every submission."
-            )
-
         if problems:
             raise ValueError(
                 f"Refusing to start in environment '{self.environment}':\n  - "
@@ -201,10 +193,25 @@ class Settings(BaseSettings):
             )
 
         warnings: list[str] = []
+
+        # An unconfigured provider used to refuse the boot. It cannot any
+        # more. A professor installing AutoGrade on their own computer
+        # chooses their AI provider in Settings, after the application is
+        # running; demanding a key in .env before it will start sends them
+        # into the one file the design promises they never have to open.
+        # Grading is still blocked until a provider is configured, and the
+        # page that configures it is where that belongs.
+        if not self.grading_configured():
+            warnings.append(
+                f"No server-wide '{self.active_provider()}' credentials. "
+                "Grading works only for users who have set their own key "
+                "under Settings -> AI providers."
+            )
+
         if not self.canvas_base_url:
             warnings.append(
-                "Canvas is not configured; grades can still be exported as "
-                "CSV/Excel/PDF but cannot be pushed to the gradebook."
+                "Canvas is not configured server-wide; each instructor can "
+                "connect their own under Settings -> Canvas."
             )
         return warnings
 

@@ -175,7 +175,7 @@ fi
 if command -v curl >/dev/null 2>&1; then
   if curl -sS -o /dev/null --max-time 2 http://localhost:80 2>/dev/null; then
     warn "Something is already answering on port 80 (Apache? IIS? Skype?)."
-    warn "If startup fails, see RUN_AND_SHARE.md section 10 to move the ports."
+    warn "If startup fails, change the published ports in docker-compose.prod.yml."
   fi
 fi
 

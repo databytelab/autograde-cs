@@ -36,6 +36,41 @@ def grading_ready(status: dict[str, Any] | None) -> bool:
     return bool(status.get("llm_configured", status.get("anthropic_configured", False)))
 
 
+PROVIDER_NAMES = {
+    "openai": "OpenAI",
+    "anthropic": "Claude",
+    "local": "a local model",
+}
+
+
+def user_grading_status() -> dict[str, Any]:
+    """
+    Whether *this user* can grade, and with what.
+
+    The health endpoint only knows about the server-wide provider, so on
+    its own it tells a professor who has saved their own key that grading
+    is unavailable - and then names an environment variable they were
+    promised they would never have to touch. Their own credentials decide
+    this, so ask the endpoint that knows about them.
+    """
+    settings = api_client.provider_settings()
+    if settings is None:
+        # The settings call failed. Fall back to the server-wide view
+        # rather than claiming something we cannot know.
+        health = api_client.health()
+        return {"ready": grading_ready(health), "how": PROVIDER_NAMES.get(
+            (health or {}).get("llm_provider", ""), "the configured provider")}
+
+    preferred = settings.get("preferred_provider")
+    if preferred:
+        return {"ready": True,
+                "how": f"your own {PROVIDER_NAMES.get(preferred, preferred)} account"}
+    if settings.get("administrator_available"):
+        name = PROVIDER_NAMES.get(settings.get("administrator_provider", ""), "")
+        return {"ready": True, "how": f"the shared {name} account".rstrip()}
+    return {"ready": False, "how": None}
+
+
 def grading_key_hint(status: dict[str, Any] | None) -> str:
     """The provider name and the env var to set, e.g. 'OPENAI_API_KEY'."""
     provider = (status or {}).get("llm_provider", "anthropic")
@@ -157,15 +192,18 @@ _PROVIDER_LABEL = {
 
 
 def _backend_status_line() -> None:
-    """Shared sidebar footer: is the API reachable, is grading configured?"""
-    status = api_client.health()
-    if status is None:
-        st.error("Backend offline - start the API server")
-    elif not grading_ready(status):
-        st.warning(f"Grading unavailable - set {grading_key_hint(status)}")
+    """Shared sidebar footer: is the API reachable, can this user grade?"""
+    if api_client.health() is None:
+        st.error("AutoGrade is not answering. Use Restart AutoGrade.")
+        return
+
+    grading = user_grading_status()
+    if grading["ready"]:
+        st.success(f"Ready to grade - using {grading['how']}")
     else:
-        provider = status.get("llm_provider", "")
-        st.success(f"Ready to grade - using {_PROVIDER_LABEL.get(provider, provider)}")
+        st.warning("No AI provider set up yet")
+        page_link("pages/settings_providers.py", "Set one up",
+                  ":material/key:")
 
 
 def render_sidebar(user: dict[str, Any]) -> None:

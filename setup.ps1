@@ -38,7 +38,8 @@ if (Test-Compose "docker" @("compose")) {
 } elseif (Test-Compose "docker-compose" @()) {
     $script:Compose = @("docker-compose")
 } else {
-    $plugin = Join-Path $env:ProgramFiles "Docker\Dockeresources\cli-plugins\docker-compose.exe"
+    $plugin = Join-Path $env:ProgramFiles "Docker\Docker
+esources\cli-plugins\docker-compose.exe"
     if (Test-Path $plugin) { $script:Compose = @($plugin) }
 }
 if (-not $script:Compose) {
@@ -180,7 +181,7 @@ CANVAS_API_TOKEN=
 $busy = Get-NetTCPConnection -LocalPort 80, 443 -State Listen -ErrorAction SilentlyContinue
 if ($busy) {
     Warn "Ports 80/443 are already in use (Apache? IIS? XAMPP?)."
-    Warn "If startup fails, see RUN_AND_SHARE.md section 10 to move the ports."
+    Warn "If startup fails, change the published ports in docker-compose.prod.yml."
 }
 
 # --------------------------------------------------------------- start

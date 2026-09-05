@@ -244,10 +244,21 @@ def test_default_database_url_is_refused_in_production():
             database_url="sqlite:///./autograde.db").assert_production_ready()
 
 
-def test_unconfigured_provider_is_refused_in_production():
-    """Booting with no usable key would fail every submission at grade time."""
-    with pytest.raises(ValueError, match="provider"):
-        _production_settings(openai_api_key="").assert_production_ready()
+def test_an_unconfigured_provider_warns_but_does_not_refuse_the_boot():
+    """
+    This used to be fatal. It cannot be: a professor installing AutoGrade
+    on their own computer chooses their AI provider in Settings, after the
+    application is up. Refusing to start until a key is in .env sends them
+    into the one file the whole design promises they never have to open.
+    """
+    warnings = _production_settings(openai_api_key="").assert_production_ready()
+    assert any("Settings" in w for w in warnings), warnings
+
+
+def test_relaxing_the_provider_gate_did_not_relax_the_security_gates():
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        _production_settings(openai_api_key="",
+                             secret_key="short").assert_production_ready()
 
 
 def test_placeholder_secret_from_env_example_is_refused():

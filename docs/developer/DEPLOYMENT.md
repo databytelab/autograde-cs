@@ -8,8 +8,8 @@ worker. There is no Kubernetes, no Redis, no message broker and no separate
 frontend build, because at this scale each adds more failure modes than it
 removes.
 
-**To install it, follow [INSTALL.md](INSTALL.md).** To run it day to day,
-[RUN_AND_SHARE.md](RUN_AND_SHARE.md). This file is for understanding it.
+**To install it, follow [INSTALL.md](../../INSTALL.md).** To run it day to day,
+[RUN_AND_SHARE.md](../../RUN_AND_SHARE.md). This file is for understanding it.
 
 ---
 

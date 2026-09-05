@@ -70,7 +70,7 @@ Canvas does not decide whether a shared instance works. It decides whose it shou
 
 ## 5. Option 1 — they run it themselves
 
-Send them the ZIP and [INSTALL.md](INSTALL.md). They run one command.
+Send them the ZIP and [INSTALL.md](../../INSTALL.md). They run one command.
 
 - Nothing ever leaves their machine. With Ollama, nothing leaves at all
 - They are their own administrator. You never see their data

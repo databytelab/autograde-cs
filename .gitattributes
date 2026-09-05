@@ -12,8 +12,11 @@ Caddyfile       text eol=lf
 *.yaml          text eol=lf
 .env.example    text eol=lf
 
-# PowerShell is the other way round.
+# Windows scripts are the other way round. cmd.exe mis-parses a batch
+# file with LF-only line endings.
 *.ps1           text eol=crlf
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
 
 # Let git decide for everything else.
 *               text=auto

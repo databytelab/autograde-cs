@@ -121,12 +121,15 @@ class FakeBackend:
 
     def __init__(self, *, anthropic_configured: bool = True,
                  canvas_configured: bool = False, courses=UNSET,
-                 signup_open: bool = True, needs_first_account: bool = False):
+                 signup_open: bool = True, needs_first_account: bool = False,
+                 provider_credentials=None, preferred_provider=None):
         self.anthropic_configured = anthropic_configured
         self.canvas_configured = canvas_configured
         self.courses = COURSE if courses is FakeBackend.UNSET else courses
         self.signup_open = signup_open
         self.needs_first_account = needs_first_account
+        self.provider_credentials = provider_credentials or []
+        self.preferred_provider = preferred_provider
 
     # -- status --
     def health(self):
@@ -188,8 +191,9 @@ class FakeBackend:
     # -- settings pages --
     def provider_settings(self):
         return {"supported": ["openai", "anthropic", "local"],
-                "credentials": [], "preferred_provider": None,
-                "using_administrator": True,
+                "credentials": self.provider_credentials,
+                "preferred_provider": self.preferred_provider,
+                "using_administrator": self.preferred_provider is None,
                 "administrator_provider": "openai",
                 "administrator_available": self.anthropic_configured}
 
@@ -225,6 +229,24 @@ def fake_backend(monkeypatch):
 
     return install
 
+
+
+def page_text(app) -> str:
+    """
+    Everything the page actually renders, as one string.
+
+    `str(app)` prints AppTest's own repr, which omits the markdown - so an
+    assertion against it passes or fails for the wrong reason.
+    """
+    parts: list[str] = []
+    for name in ("title", "header", "subheader", "markdown", "caption",
+                 "text", "success", "info", "warning", "error"):
+        for element in getattr(app, name, []):
+            parts.append(str(getattr(element, "value", "")))
+    for name in ("button", "text_input", "selectbox", "checkbox", "radio"):
+        for widget in getattr(app, name, []):
+            parts.append(str(getattr(widget, "label", "")))
+    return "\n".join(parts)
 
 def run_page(path: Path, *, signed_in: bool = True,
              session_state: dict | None = None) -> AppTest:
@@ -331,11 +353,28 @@ def test_home_shows_the_credential_fields_in_the_auth_view(fake_backend):
     assert "Password" in labels
 
 
-def test_home_warns_when_no_api_key(fake_backend):
+def test_home_sends_you_to_settings_when_no_provider_is_set_up(fake_backend):
+    """
+    This used to name an environment variable. A professor who installed
+    the package has no .env open and no reason to know what one is; the
+    only useful thing to say is where to click.
+    """
     fake_backend(anthropic_configured=False)
     app = run_page(PAGES["app"])
     warnings = " ".join(w.value for w in app.warning)
-    assert "ANTHROPIC_API_KEY" in warnings
+    assert "not set up" in warnings
+    assert ".env" not in warnings
+    assert "API_KEY" not in warnings
+
+
+def test_home_says_nothing_when_the_user_has_their_own_key(fake_backend):
+    """The server having no key is irrelevant to someone who brought one."""
+    fake_backend(anthropic_configured=False,
+                 provider_credentials=[SAVED_KEY],
+                 preferred_provider="openai")
+    app = run_page(PAGES["app"])
+    warnings = " ".join(w.value for w in app.warning)
+    assert "not set up" not in warnings
 
 
 def test_home_does_not_warn_when_the_key_is_present(fake_backend):
@@ -372,7 +411,8 @@ def test_upload_page_disables_grading_without_a_key(fake_backend):
     app = run_page(PAGES["upload_grade"])
     assert not app.exception
     errors = " ".join(e.value for e in app.error)
-    assert "Grading is unavailable" in errors
+    assert "No AI provider is set up" in errors
+    assert ".env" not in errors
 
 
 def test_upload_page_offers_grading_when_configured(fake_backend):
@@ -461,3 +501,63 @@ def test_new_assignment_offers_all_rubric_routes(fake_backend):
     assert any("solution file" in o for o in options)
     assert any("JSON" in o for o in options)
     assert any("default" in o for o in options)
+
+
+# ---------------------------------------------------------------------
+# Settings - the two pages a professor has to get right before grading
+# ---------------------------------------------------------------------
+SAVED_KEY = {
+    "provider": "openai", "masked_key": "****ab12", "has_key": True,
+    "base_url": None, "model": "gpt-4o", "last_tested_at": None,
+    "last_test_ok": True, "last_test_detail": "Reached OpenAI.",
+}
+
+
+def test_a_fresh_install_says_grading_is_not_set_up_yet(fake_backend):
+    """
+    The first thing a professor sees on this page decides whether they
+    know what to do next. With no key anywhere, it has to say so.
+    """
+    fake_backend(anthropic_configured=False)
+    app = run_page(PAGES["settings_providers"])
+    assert not app.exception
+    warnings = " ".join(w.value for w in app.warning)
+    assert "not set up" in warnings.lower()
+
+
+def test_a_saved_key_is_reported_as_working(fake_backend):
+    fake_backend(anthropic_configured=False,
+                 provider_credentials=[SAVED_KEY],
+                 preferred_provider="openai")
+    app = run_page(PAGES["settings_providers"])
+    assert not app.exception
+    successes = " ".join(s.value for s in app.success)
+    assert "Grading is set up" in successes
+    assert "gpt-4o" in successes
+
+
+def test_the_providers_page_never_shows_a_whole_key(fake_backend):
+    fake_backend(provider_credentials=[SAVED_KEY], preferred_provider="openai")
+    app = run_page(PAGES["settings_providers"])
+    rendered = page_text(app)
+    assert "ab12" in rendered          # the masked tail is fine
+    assert "sk-a" not in rendered      # a real key never is
+
+
+def test_the_providers_page_offers_all_three_providers(fake_backend):
+    fake_backend()
+    app = run_page(PAGES["settings_providers"])
+    assert not app.exception
+    rendered = page_text(app)
+    for expected in ("OpenAI", "Claude", "Ollama"):
+        assert expected in rendered
+
+
+def test_the_canvas_page_explains_where_the_token_comes_from(fake_backend):
+    """A professor who cannot find the token cannot use Canvas at all."""
+    fake_backend()
+    app = run_page(PAGES["settings_canvas"])
+    assert not app.exception
+    rendered = page_text(app)
+    assert "Approved Integrations" in rendered
+    assert "New Access Token" in rendered

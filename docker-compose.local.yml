@@ -1,0 +1,149 @@
+# AutoGrade CS - the local installation, for one professor on one computer.
+#
+# You do not need to read or run this file. "Start AutoGrade" does it for
+# you. It is here so that what runs is inspectable.
+#
+# Differences from docker-compose.prod.yml, which is for a department
+# server serving many people over the network:
+#
+#   * No reverse proxy and no HTTPS. Everything is published on 127.0.0.1
+#     only, so nothing is reachable from the network and there is no
+#     certificate for a browser to complain about. The address is a plain
+#     http://localhost:8501.
+#   * Backups land in a `backups` folder next to this file rather than
+#     inside a Docker volume, so they can be copied like any other file.
+#
+# Five services:
+#   frontend  Streamlit - the pages you use
+#   api       FastAPI - serves requests, never grades
+#   worker    grades; the only process that talks to the AI provider
+#   db        PostgreSQL - the gradebook
+#   backup    a pg_dump every 24 hours, kept for 30 days
+
+name: autograde
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    restart: unless-stopped
+    environment:
+      AUTOGRADE_API_BASE: http://api:8000
+    ports:
+      # 127.0.0.1 on purpose: reachable from this computer, from nowhere else.
+      - "127.0.0.1:${AUTOGRADE_PORT:-8501}:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [app]
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    # Named so the worker reuses this image instead of building the same
+    # Dockerfile a second time, and so both certainly run identical code.
+    image: autograde-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg2://autograde:${POSTGRES_PASSWORD:?run Start AutoGrade, which writes .env}@db:5432/autograde
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    # "Test connection" and "Detect models" on the AI providers page call
+    # the model server from *this* process, not from the worker, so the API
+    # needs to reach Ollama on the host as well. Docker Desktop provides
+    # this name already; the entry is what makes it work on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Loopback only. Used by the launcher's health check and by
+      # http://localhost:8000/docs if you ever want to look.
+      - "127.0.0.1:${AUTOGRADE_API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [app, data]
+
+  worker:
+    image: autograde-backend:latest
+    restart: unless-stopped
+    # Migrations are the API's job; the worker waits for them and runs.
+    entrypoint: ["python", "-m", "backend.worker"]
+    # The image's healthcheck curls a port a worker does not listen on.
+    # Liveness here is `restart: unless-stopped` plus the stale-job reaper:
+    # if this process dies mid-run, the job is picked up again within a
+    # minute without re-grading what was already done.
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg2://autograde:${POSTGRES_PASSWORD:?run Start AutoGrade, which writes .env}@db:5432/autograde
+      UPLOAD_DIR: /app/uploads
+      # Lets the worker reach Ollama running on Windows or macOS itself.
+      # Docker Desktop provides this name; on Linux the extra_hosts entry
+      # below supplies it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # The worker reads the files it grades, so it needs the same volume
+      # as the API - not a copy.
+      - uploads:/app/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [app, data]
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autograde
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run Start AutoGrade, which writes .env}
+      POSTGRES_DB: autograde
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Bind-mounted so a backup is an ordinary file you can copy to a USB
+      # stick, not something buried in a Docker volume.
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autograde -d autograde"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [data]
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?run Start AutoGrade, which writes .env}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - ./docker/backup.sh:/usr/local/bin/backup.sh:ro
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [data]
+
+networks:
+  # app   frontend/api/worker. An ordinary bridge: nothing is reachable
+  #       from the network, but outbound traffic works - which the worker
+  #       needs, because grading calls the AI provider.
+  # data  api/worker/backup/db, internal on purpose: PostgreSQL has no
+  #       reason to reach the internet, so it cannot.
+  app:
+  data:
+    internal: true
+
+volumes:
+  pgdata:       # the gradebook
+  uploads:      # student submissions - not in the database
