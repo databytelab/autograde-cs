@@ -24,11 +24,41 @@ say ""
 # ---------------------------------------------------------------- checks
 command -v docker >/dev/null 2>&1 || die \
   "Docker is not installed. Get it from https://docs.docker.com/get-docker/ then run this again."
-docker compose version >/dev/null 2>&1 || die \
-  "Docker is installed but 'docker compose' is not available. Update Docker Desktop."
+
+# Find Compose. `docker compose` is the normal answer, but Docker Desktop
+# ships it as a plugin the CLI discovers through the user's home directory,
+# and some shells (Git Bash with a redirected HOME, for one) never find it
+# even though the binary is sitting right there. Falling back to the binary
+# beats telling someone to reinstall the Docker they already have.
+find_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose); return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE=(docker-compose); return 0
+  fi
+  local dir; dir=$(dirname "$(command -v docker)")
+  local candidate
+  for candidate in \
+      "$dir/../cli-plugins/docker-compose.exe" \
+      "$dir/../cli-plugins/docker-compose" \
+      "$dir/../../resources/cli-plugins/docker-compose.exe" \
+      "/c/Program Files/Docker/Docker/resources/cli-plugins/docker-compose.exe" \
+      "$HOME/.docker/cli-plugins/docker-compose"; do
+    if [ -x "$candidate" ]; then COMPOSE=("$candidate"); return 0; fi
+  done
+  return 1
+}
+
+find_compose || die \
+  "Docker is installed but Compose is not. Install Docker Desktop, which includes it: https://docs.docker.com/get-docker/"
 docker info >/dev/null 2>&1 || die \
   "Docker is installed but not running. Start Docker Desktop, wait for the whale icon to settle, then run this again."
 ok "Docker is installed and running"
+
+# The commands printed at the end must be the ones that work in this
+# shell, not the ones that ought to.
+COMPOSE_SHOWN="${COMPOSE[*]} -f docker-compose.prod.yml"
 
 # A secret generator that does not assume Python is installed.
 gen() {
@@ -153,7 +183,7 @@ fi
 say ""
 say "${BOLD}Building and starting.${OFF} First run downloads a lot — 5-10 minutes is normal."
 say ""
-docker compose -f docker-compose.prod.yml up -d --build
+"${COMPOSE[@]}" -f docker-compose.prod.yml up -d --build
 
 say ""
 say "Waiting for AutoGrade to come up..."
@@ -166,7 +196,7 @@ for _ in $(seq 1 60); do
 done
 
 say ""
-if docker compose -f docker-compose.prod.yml ps --status running \
+if "${COMPOSE[@]}" -f docker-compose.prod.yml ps --status running \
      --format '{{.Service}}' 2>/dev/null | grep -q api; then
   HOST_SHOWN=$(grep '^PUBLIC_HOSTNAME=' .env | cut -d= -f2)
   ok "AutoGrade is running."
@@ -177,12 +207,12 @@ if docker compose -f docker-compose.prod.yml ps --status running \
   say "  Create yours now, before giving the address to anyone else."
   say ""
   say "  Useful commands:"
-  say "    docker compose -f docker-compose.prod.yml ps        # what's running"
-  say "    docker compose -f docker-compose.prod.yml logs -f   # watch the logs"
-  say "    docker compose -f docker-compose.prod.yml stop      # stop it"
+  say "    $COMPOSE_SHOWN ps        # what's running"
+  say "    $COMPOSE_SHOWN logs -f   # watch the logs"
+  say "    $COMPOSE_SHOWN stop      # stop it"
   say ""
   [ "$HOST_SHOWN" = "localhost" ] && warn \
     "On 'localhost' the browser will warn about the certificate. That is expected. Click Advanced -> Proceed."
 else
-  die "Something did not start. Run: docker compose -f docker-compose.prod.yml logs"
+  die "Something did not start. Run: $COMPOSE_SHOWN logs"
 fi

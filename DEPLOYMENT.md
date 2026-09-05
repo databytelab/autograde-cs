@@ -1,6 +1,6 @@
 # AutoGrade CS — deployment guide
 
-Release: **v0.9.0-pilot** — a release candidate for a single-department pilot.
+Release: **v0.9.2-pilot** — a release candidate for a single-department pilot.
 
 This describes the supported production deployment: one host, Docker
 Compose, PostgreSQL, and a background grading worker. It is deliberately
@@ -44,7 +44,7 @@ called around the proxy.
 
 ```bash
 git clone <your-remote> autograde && cd autograde
-git checkout v0.9.0-pilot
+git checkout v0.9.2-pilot
 cp .env.example .env
 ```
 
@@ -91,8 +91,12 @@ refused boot is intentional — it is safer than a silently insecure service.
 
 ### Create the first account
 
-Registration is open, so the first person to sign up gets an account. Do it
-immediately after deploying, before the URL is shared:
+Self sign-up is closed in production (`ALLOW_OPEN_REGISTRATION=false`, the
+default). The one exception is the very first account, which becomes the
+**administrator** — otherwise a fresh install could never be set up. Create
+it immediately after deploying, before the URL is shared; every account
+after it is created by that administrator, in the UI under **Settings →
+Account → People** or through the same endpoint with their bearer token:
 
 ```bash
 curl -sS https://<PUBLIC_HOSTNAME>/api/auth/register \
@@ -208,7 +212,7 @@ first — it is the rollback.
 ### Rollback
 
 ```bash
-git checkout v0.9.0-pilot
+git checkout v0.9.2-pilot
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
@@ -275,7 +279,7 @@ failures.
 | Risk | Mitigation now | Fix if it becomes real |
 |---|---|---|
 | **Prompt injection** — students author the text that goes to the grader | System prompt fences the submission and flags attempts as `prompt_injection`; instructor approves every grade | Treat the flag as a must-review queue |
-| **Registration is open** — anyone reaching the URL can create an account | Deploy inside the university network; create your account immediately | Invite codes or SSO |
+| **No reset-by-email** — a forgotten password needs the administrator | Administrators reset passwords and deactivate accounts in the UI | SSO, once a university identity provider is available |
 | **Tokens cannot be revoked** before their 8h expiry | Short-ish expiry; staff-only accounts | Server-side session table |
 | **One host** — no redundancy | Backups, `restart: unless-stopped` | A second host, or accept the downtime |
 | **Model spend** is unbounded per run | Job counters make cost visible per assignment | A per-course budget cap |

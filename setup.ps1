@@ -22,8 +22,34 @@ Say ""
 try { docker --version | Out-Null } catch {
     Die "Docker is not installed. Get Docker Desktop from https://docs.docker.com/get-docker/ then run this again."
 }
-try { docker compose version | Out-Null } catch {
-    Die "Docker is installed but 'docker compose' is unavailable. Update Docker Desktop."
+# Find Compose. Normally `docker compose`, but fall back to the standalone
+# binary and then to the plugin Docker Desktop installs, rather than telling
+# someone to reinstall the Docker they already have.
+$script:Compose = $null
+function Test-Compose {
+    param($Exe, $Args)
+    try {
+        & $Exe @Args version 2>&1 | Out-Null
+        return $LASTEXITCODE -eq 0
+    } catch { return $false }
+}
+if (Test-Compose "docker" @("compose")) {
+    $script:Compose = @("docker", "compose")
+} elseif (Test-Compose "docker-compose" @()) {
+    $script:Compose = @("docker-compose")
+} else {
+    $plugin = Join-Path $env:ProgramFiles "Docker\Dockeresources\cli-plugins\docker-compose.exe"
+    if (Test-Path $plugin) { $script:Compose = @($plugin) }
+}
+if (-not $script:Compose) {
+    Die "Docker is installed but Compose is not. Install Docker Desktop, which includes it: https://docs.docker.com/get-docker/"
+}
+$ComposeShown = ($script:Compose -join " ") + " -f docker-compose.prod.yml"
+
+function Invoke-Compose {
+    $exe = $script:Compose[0]
+    $pre = @($script:Compose[1..($script:Compose.Count - 1)])
+    & $exe @pre @args
 }
 try { docker info 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { throw } } catch {
     Die "Docker Desktop is installed but not running. Start it, wait for the whale icon to stop animating, then run this again."
@@ -161,8 +187,8 @@ if ($busy) {
 Say ""
 Say "Building and starting. First run downloads a lot - 5-10 minutes is normal."
 Say ""
-docker compose -f docker-compose.prod.yml up -d --build
-if ($LASTEXITCODE -ne 0) { Die "Startup failed. Run: docker compose -f docker-compose.prod.yml logs" }
+Invoke-Compose -f docker-compose.prod.yml up -d --build
+if ($LASTEXITCODE -ne 0) { Die "Startup failed. Run: $ComposeShown logs" }
 
 Say ""
 Say "Waiting for AutoGrade to come up..."
@@ -187,9 +213,9 @@ Say "  The first account you create becomes the administrator."
 Say "  Create yours now, before giving the address to anyone else."
 Say ""
 Say "  Useful commands:"
-Say "    docker compose -f docker-compose.prod.yml ps        # what's running"
-Say "    docker compose -f docker-compose.prod.yml logs -f   # watch the logs"
-Say "    docker compose -f docker-compose.prod.yml stop      # stop it"
+Say "    $ComposeShown ps        # what's running"
+Say "    $ComposeShown logs -f   # watch the logs"
+Say "    $ComposeShown stop      # stop it"
 Say ""
 if ($shown -eq "localhost") {
     Warn "On 'localhost' the browser warns about the certificate. That is expected - click Advanced, then Proceed."

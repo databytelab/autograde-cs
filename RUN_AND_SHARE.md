@@ -269,7 +269,7 @@ docker compose -f docker-compose.prod.yml exec backup \
 
 # 2. Get the new version
 git fetch --tags
-git checkout v0.9.1-pilot
+git checkout v0.9.2-pilot
 
 # 3. Rebuild and restart (migrations run automatically)
 docker compose -f docker-compose.prod.yml up -d --build
@@ -279,10 +279,29 @@ docker compose -f docker-compose.prod.yml ps
 curl -k https://localhost/api/health
 ```
 
+### If you were given a ZIP rather than a git checkout
+
+Same shape, without git. Your `.env`, your database and your uploads live
+outside the folder that changes — the database and uploads are in Docker
+volumes, and `.env` you copy across — so an upgrade is: unzip beside the
+old one, bring your `.env`, rebuild.
+
+```bash
+# 1. Back up first (step 1 above), then:
+cd ..
+unzip autograde-<new-version>.zip
+cp autograde-<old-version>/.env autograde-<new-version>/.env
+cd autograde-<new-version>
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Keep the old folder until the new one has graded something. It is your
+rollback: `cd` back into it and run the same `up -d --build`.
+
 **Rollback:**
 
 ```bash
-git checkout <previous-tag>
+git checkout <previous-tag>          # or cd back into the old ZIP folder
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
@@ -320,7 +339,7 @@ After that, you make the accounts:
 3. **Add a colleague**: name, university email, a long initial password,
    role *professor*.
 4. Send them the URL, that email and that password, and ask them to change
-   it under **Settings → Account → Change password**.
+   it under **Settings → Account → Change your password**.
 
 The same page lets you **reset a forgotten password** and **deactivate**
 someone who has left — a deactivated account can no longer sign in, and

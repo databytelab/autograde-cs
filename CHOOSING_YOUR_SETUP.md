@@ -72,26 +72,34 @@ Step 5 sends coursework text to a third party. Two mitigations, both real:
 
 ---
 
-## 3. A second, concrete problem with the shared-website idea
+## 3. Canvas: fixed mechanically, still awkward socially
 
-Beyond trust, there is a mechanical blocker.
+This used to be a hard blocker: one `CANVAS_API_TOKEN` for the whole
+server meant every push went out with one person's Canvas permissions, so
+a shared instance could only write grades into that person's courses.
 
-**The Canvas token is configured once for the whole server, not per
-instructor.** Every Canvas push uses that one token, with that one person's
-Canvas permissions.
+**That is fixed.** Each instructor now connects their own Canvas under
+**Settings → Canvas**. The token is encrypted at rest and used only for
+their own requests, so one instance can serve a whole department, each
+professor pushing into their own courses.
 
-So on a website you host:
+What is *not* fixed is who holds the token, and no amount of engineering
+can fix it:
 
-- Your Canvas token cannot write grades into a colleague's course, let
-  alone another university's Canvas.
-- Making it work would mean each professor handing you *their* Canvas API
-  token — which acts as them, across all their courses, with full
-  read/write. That is a far bigger ask than the files, and most instructors
-  should refuse.
+- A Canvas API token acts as that person, across every course they teach,
+  with full read and write. It is a far bigger ask than a folder of
+  submissions.
+- On an instance **you** host, that token sits in **your** database,
+  encrypted with **your** key. Encryption protects it from an outsider who
+  steals the disk. It does not protect it from the person who runs the
+  server.
+- On an instance **their** department hosts, the same token sits on their
+  own hardware, encrypted with their own key. Nothing changes for them
+  except who they have to trust — and the answer becomes "ourselves".
 
-Canvas push therefore only really works when AutoGrade is run **by the same
-institution whose Canvas it is talking to**. That single fact rules out the
-cross-university website more decisively than the trust argument does.
+So Canvas no longer decides *whether* a shared instance can work. It
+decides *whose* shared instance it should be: the institution whose Canvas
+it is talking to.
 
 ---
 
@@ -104,14 +112,15 @@ all — no internet needed after setup).
 
 - They install Docker Desktop once, then run one command.
 - They are their own administrator. You never see their data.
-- Realistically ~20 minutes of setup with `RUN_AND_SHARE.md`.
+- Realistically ~20 minutes of setup with `INSTALL.md`, most of it
+  waiting for Docker to download.
 
 **Good for:** the privacy-maximalist colleague, anyone at another
 institution, anyone who says "I'd rather not".
 
 **Cost:** they must install Docker. Their laptop must be on while grading.
-Canvas push works, because they use their own Canvas token in their own
-`.env`.
+Canvas push works, because they connect their own Canvas under
+**Settings → Canvas** and the token never leaves their machine.
 
 ### Option 2 — Your university or department runs one instance ⭐
 
@@ -123,7 +132,8 @@ Everyone at the university signs in with a link and a password.
   policy. That is a completely different conversation from "it's on
   Irfan's computer".
 - Colleagues install nothing.
-- Canvas push works properly — one institution, one Canvas, one token.
+- Canvas push works properly — one institution, one Canvas, and each
+  professor connecting their own account.
 - IT can inspect the code and the deployment before approving it.
 
 **Good for:** essentially everyone at your own university. **This is the
@@ -146,7 +156,6 @@ intend to support.
 - A published privacy policy and retention schedule
 - Encryption of submissions at rest, and an audit log of administrator
   access
-- Per-instructor Canvas tokens (§3)
 - Self-service account and data deletion
 - Security response, uptime commitments, backups you are contractually
   on the hook for
@@ -163,7 +172,7 @@ That is a company, not a weekend project. Do not start here.
 | Where student work is stored | Their laptop | University server | Your server |
 | Who can read it | Only them | University IT + you | **You** |
 | They install anything? | Docker, once | No | No |
-| Canvas push | Works (own token) | Works | **Broken** (§3) |
+| Canvas push | Works (own token) | Works (own token) | Works — but their Canvas token lives on **your** server (§3) |
 | Works fully offline | Yes, with Ollama | If Ollama is on the LAN | No |
 | Effort for you | Write a guide | One VM | Months |
 | Effort for them | ~20 min | Zero | Zero |
@@ -181,13 +190,21 @@ That is a company, not a weekend project. Do not start here.
    university infrastructure, which is where it already is. This removes
    almost all of the trust problem in one step.
 
-2. **For anyone outside your university, or anyone hesitant — point them at
-   Option 1.** "Here is the code and a 20-minute guide; run it yourself and
-   I never see anything." Being *able* to say that is itself the strongest
-   trust argument you have, whether or not they take it up.
+2. **For anyone outside your university — hand over the package, do not
+   host it.** Send them the ZIP (`RUN_AND_SHARE.md` §15) and `INSTALL.md`.
+   They run one command, add their own AI key and their own Canvas token,
+   and nothing of theirs ever touches a machine of yours. What you sell is
+   installation, configuration, support and upgrades — the part that is
+   genuinely hard — rather than storage of other people's student work,
+   which is the part that is genuinely risky.
+
+   This is not a compromise. "I never see your data, and here is why that
+   is structurally true" is a stronger sales position than any privacy
+   policy you could write for a hosted service.
 
 3. **Do not build the public website** unless and until several
-   institutions ask for it and someone is funding it properly.
+   institutions ask for it and someone is funding it properly — including
+   funding whoever has to answer for a breach.
 
 ---
 

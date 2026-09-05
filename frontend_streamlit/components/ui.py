@@ -109,6 +109,11 @@ WORKFLOW = [
     ("pages/upload_grade.py", "3 · Upload & grade", ":material/upload_file:"),
     ("pages/review_results.py", "4 · Review results", ":material/fact_check:"),
     ("pages/export.py", "5 · Export", ":material/download:"),
+]
+
+# Kept apart from the numbered steps: these are configured once and then
+# forgotten, not part of grading a batch.
+SETTINGS = [
     ("pages/settings_providers.py", "AI providers", ":material/key:"),
     ("pages/settings_canvas.py", "Canvas", ":material/school:"),
     ("pages/settings_account.py", "Account", ":material/person:"),
@@ -134,6 +139,11 @@ def page_link(target: str, label: str, icon: str | None = None) -> None:
 def _workflow_links() -> None:
     """The five workflow steps, in the order a professor performs them."""
     for target, label, icon in WORKFLOW:
+        page_link(target, label, icon)
+
+
+def _settings_links() -> None:
+    for target, label, icon in SETTINGS:
         page_link(target, label, icon)
 
 
@@ -167,6 +177,9 @@ def render_sidebar(user: dict[str, Any]) -> None:
         st.divider()
         st.markdown("**Workflow**")
         _workflow_links()
+
+        st.markdown("**Settings**")
+        _settings_links()
 
         st.divider()
         _backend_status_line()

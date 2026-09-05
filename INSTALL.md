@@ -224,7 +224,7 @@ grade something.
 
 Everyone else gets an account from you. They install nothing.
 
-1. In the left sidebar, click **Account**.
+1. In the left sidebar, under **Settings**, click **Account**.
 2. Scroll to **Add someone**.
 3. Enter their **Full name** and **Email**.
 4. A random **Initial password** is filled in for you. Copy it.
@@ -240,10 +240,11 @@ Email:       their.email@university.edu
 Password:    the initial password you copied
 ```
 
-Ask them to change it under **Account → Change your password**.
+Ask them to change it under **Settings → Account → Change your
+password**.
 
-If someone forgets their password, open **Account**, expand their name, and
-use **Reset their password**.
+If someone forgets their password, open **Settings → Account**, expand
+their name under **People on this instance**, and use **Reset password**.
 
 ---
 
@@ -357,6 +358,7 @@ drill once before you rely on this.
 | What you see | What to do |
 |---|---|
 | `docker: command not found` | Docker is not installed, or you did not restart after installing |
+| `docker: unknown command: docker compose` | Your shell cannot see the Compose plugin. Use `docker-compose` (with the hyphen) in place of `docker compose` in every command below. `setup.sh` already falls back to it by itself. |
 | `Cannot connect to the Docker daemon` | Docker Desktop is not running. Open it and wait for the whale to settle. |
 | `running scripts is disabled` (Windows) | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then retry |
 | `port is already allocated` | Something else uses ports 80/443 (XAMPP, IIS, Skype). Stop it, or see `RUN_AND_SHARE.md` §10 |
@@ -365,7 +367,33 @@ drill once before you rely on this.
 | Grading stays "queued" | The worker is not running: `docker compose -f docker-compose.prod.yml ps`, then `logs worker` |
 | Every submission fails "could not reach the … server" | Wrong API key, no internet, or (for Ollama) the wrong URL — see §8 |
 | Cannot sign in, 429 error | Too many wrong passwords. Wait 15 minutes. |
-| Forgot the administrator password | The only account that can reset it is itself. Contact your supplier — recovery needs database access. |
+| Forgot the administrator password | Nobody else can reset it — see **Recovering the administrator** below. |
+
+### Recovering the administrator
+
+Only an administrator can reset passwords, so if you lose that account
+there is no way in through the browser. There is one from the server
+itself. On the machine running AutoGrade:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api python -c "
+from backend.database import SessionLocal
+from backend.models.user import User
+from backend.utils.auth_utils import hash_password
+db = SessionLocal()
+user = db.query(User).filter(User.is_admin == True).order_by(User.id).first()
+user.password_hash = hash_password('choose-a-long-new-password')
+db.commit()
+print('Password reset for', user.email)
+"
+```
+
+Change `choose-a-long-new-password` before running it, sign in with it, and
+change it again under **Settings → Account**. Anyone who can run this
+command already has full access to the server and the database — that is
+why it works, and why access to the machine is the thing to protect.
+
+---
 
 ### Starting completely over
 
