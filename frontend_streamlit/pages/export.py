@@ -13,6 +13,7 @@ from frontend_streamlit.components import api_client
 from frontend_streamlit.components.ui import (
     assignment_selector,
     course_selector,
+    page_link,
     page_setup,
     require_auth,
     stats_row,
@@ -120,12 +121,19 @@ st.subheader("Canvas")
 canvas = api_client.canvas_status() or {}
 if not canvas.get("configured"):
     st.info(
-        "Canvas is not configured on this server. Set `CANVAS_BASE_URL` and "
-        "`CANVAS_API_TOKEN` in `.env` — see `docs/canvas_setup.md`. "
-        "The **Canvas CSV** download above works without it."
+        "Canvas is not connected. Add your own Canvas account under "
+        "**Settings → Canvas** — it takes a minute and the token stays "
+        "yours. The **Canvas CSV** download above works without it."
     )
+    page_link("pages/settings_canvas.py", "Connect Canvas",
+              ":material/school:")
 else:
-    st.caption(f"Connected to {canvas.get('base_url')}")
+    if canvas.get("source") == "server":
+        st.caption(f"Connected to {canvas.get('base_url')} using this "
+                   "server's Canvas account. To push into your own courses, "
+                   "connect your account under **Settings → Canvas**.")
+    else:
+        st.caption(f"Connected to {canvas.get('base_url')}")
 
     if not course.get("canvas_course_id"):
         st.warning(

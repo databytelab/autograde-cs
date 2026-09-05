@@ -377,11 +377,18 @@ def test_export_page_offers_all_four_formats(fake_backend):
 
 
 def test_export_page_explains_a_missing_canvas_config(fake_backend):
+    """
+    It has to send them where the fix is. That used to be `.env`; now
+    each instructor connects their own Canvas in the interface, and a
+    message still naming an environment variable would strand them.
+    """
     fake_backend(canvas_configured=False)
     app = run_page(PAGES["export"])
     assert not app.exception
     infos = " ".join(i.value for i in app.info)
-    assert "CANVAS_BASE_URL" in infos
+    assert "Settings" in infos and "Canvas" in infos
+    assert "CANVAS_BASE_URL" not in infos
+    assert ".env" not in infos
 
 
 def test_export_page_flags_unapproved_grades(fake_backend):

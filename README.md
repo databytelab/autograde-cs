@@ -28,7 +28,8 @@ terminal in its folder, and run:
 It generates its own secrets, asks the handful of questions it cannot guess,
 and starts everything. **The first account created becomes the
 administrator** — create yours before giving anyone else the address.
-Step-by-step, with screenshots of every prompt: **[INSTALL.md](INSTALL.md)**.
+Every step spelled out, from installing Docker to your first sign-in:
+**[INSTALL.md](INSTALL.md)**.
 
 ---
 
