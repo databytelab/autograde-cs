@@ -13,6 +13,9 @@ from backend.models.grading_job     import (
     ACTIVE_STATUSES, TERMINAL_STATUSES, GradingJob, JobStatus,
 )
 from backend.models.login_attempt   import LoginAttempt
+from backend.models.provider_credential import (
+    SUPPORTED_PROVIDERS, ProviderCredential,
+)
 
 __all__ = [
     "User", "UserRole",
@@ -23,4 +26,5 @@ __all__ = [
     "SimilarityFlag",
     "GradingJob", "JobStatus", "ACTIVE_STATUSES", "TERMINAL_STATUSES",
     "LoginAttempt",
+    "ProviderCredential", "SUPPORTED_PROVIDERS",
 ]

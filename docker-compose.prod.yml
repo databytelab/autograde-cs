@@ -27,7 +27,9 @@ services:
       - "443:443"
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?set PUBLIC_HOSTNAME in .env}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      # `:-` covers unset *and* empty. Only used for local runs -
+      # with a real hostname set ACME_EMAIL to a real address.
+      ACME_EMAIL: ${ACME_EMAIL:-noreply@localhost}
       MAX_REQUEST_BODY_MB: ${MAX_REQUEST_BODY_MB:-300}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -36,7 +38,7 @@ services:
     depends_on:
       - frontend
       - api
-    networks: [edge, internal]
+    networks: [edge, app]
 
   frontend:
     build:
@@ -48,13 +50,18 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    networks: [internal]
+    networks: [app]
     expose: ["8501"]
 
   api:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
+    # Named so the worker can reuse this exact image rather than building
+    # the same Dockerfile a second time. Two services building one
+    # Dockerfile in parallel raced on the apt layer and failed the build,
+    # and sharing the image also guarantees both run identical code.
+    image: autograde-backend:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -66,16 +73,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    networks: [internal]
+    networks: [app, data]
     expose: ["8000"]
 
   worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.backend
+    # Same image as the API, different command. Built by the `api` service.
+    image: autograde-backend:latest
     restart: unless-stopped
     # Migrations are the API's job; the worker only waits for them and runs.
     entrypoint: ["python", "-m", "backend.worker"]
+    # The image's healthcheck curls the API's own port, which a worker does
+    # not listen on - inherited unchanged it reports "unhealthy" forever and
+    # buries real alerts. A worker has no endpoint to probe, so liveness is
+    # covered by `restart: unless-stopped` plus the stale-job reaper: if this
+    # process dies mid-run, another worker requeues the job within a minute.
+    healthcheck:
+      disable: true
     env_file: .env
     environment:
       ENVIRONMENT: production
@@ -88,7 +101,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    networks: [internal]
+    networks: [app, data]
     # Scale with `--scale worker=N`; claiming is transactional, so several
     # workers share the queue safely.
 
@@ -109,7 +122,7 @@ services:
       start_period: 20s
     # No `ports:` on purpose. To inspect it, tunnel in:
     #   docker compose -f docker-compose.prod.yml exec db psql -U autograde
-    networks: [internal]
+    networks: [data]
 
   backup:
     image: postgres:16-alpine
@@ -125,12 +138,23 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    networks: [internal]
+    networks: [data]
 
 networks:
-  # Only caddy sits on `edge`; everything else is internal-only.
+  # Three networks, each with one job.
+  #
+  #   edge  only caddy, which is the only service that publishes ports.
+  #   app   caddy/frontend/api/worker. A normal bridge network: nothing on
+  #         it is reachable from outside (no published ports), but outbound
+  #         traffic works - which the worker needs, because grading calls
+  #         the model provider over the internet. Marking this `internal`
+  #         severed that egress and every submission failed with
+  #         "could not reach the openai server".
+  #   data  api/worker/backup/db, and `internal: true` here on purpose:
+  #         PostgreSQL has no reason to reach the internet, so it cannot.
   edge:
-  internal:
+  app:
+  data:
     internal: true
 
 volumes:

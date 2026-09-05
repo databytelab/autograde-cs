@@ -409,3 +409,49 @@ def canvas_push_grades(assignment_id: str, only_finalized: bool = True):
         f"?only_finalized={str(only_finalized).lower()}",
         timeout=300,
     )
+
+
+# ---------------------------------------------------------------------
+# Settings - AI providers (bring your own key)
+# ---------------------------------------------------------------------
+def provider_settings():
+    """This professor's provider setup. Keys come back masked, never whole."""
+    return api_call("GET", "/api/settings/providers")
+
+
+def save_provider(provider: str, *, api_key: str | None = None,
+                  base_url: str | None = None, model: str | None = None):
+    """
+    Save a key. `api_key=None` keeps the stored one (so a professor can
+    change the model without re-typing it); "" clears it.
+    """
+    payload: dict[str, Any] = {"provider": provider}
+    if api_key is not None:
+        payload["api_key"] = api_key
+    if base_url is not None:
+        payload["base_url"] = base_url
+    if model is not None:
+        payload["model"] = model
+    return api_call("PUT", "/api/settings/providers", json=payload)
+
+
+def delete_provider(provider: str):
+    return api_call("DELETE", f"/api/settings/providers/{provider}")
+
+
+def test_provider(provider: str):
+    """One small live call, so a bad key is found now and not mid-batch."""
+    return api_call("POST", f"/api/settings/providers/{provider}/test",
+                    timeout=120)
+
+
+def set_provider_preference(provider: str | None):
+    return api_call("PUT", "/api/settings/providers/preference",
+                    json={"provider": provider})
+
+
+def discover_local_models(base_url: str | None = None):
+    """Which models the Ollama server *this deployment can reach* has pulled."""
+    suffix = f"?base_url={base_url}" if base_url else ""
+    return api_call("GET", f"/api/settings/providers/local/discover{suffix}",
+                    quiet=True, timeout=15)

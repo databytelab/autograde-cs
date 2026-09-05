@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 MAX_TOKENS = 16_000
 
+# Used whenever no gateway URL is configured.
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
 
 def make_client(api_key: str, base_url: str | None):
     """
@@ -47,13 +50,20 @@ def make_client(api_key: str, base_url: str | None):
         raise GradingError(
             "The 'openai' package is not installed. Run: pip install openai"
         )
+    # base_url is always passed explicitly, never left to the SDK.
+    #
+    # When it is omitted the SDK falls back to reading OPENAI_BASE_URL from
+    # the process environment - and .env ships that key blank. Under Docker
+    # `env_file` puts the blank value into the real environment, so the SDK
+    # built a URL with no scheme and every grading call failed with
+    # "Connection error" / UnsupportedProtocol. It never showed up in local
+    # development because pydantic-settings reads .env without exporting it.
     kwargs: dict[str, Any] = {
         "api_key": api_key or "not-needed",
         "timeout": settings.llm_timeout_seconds,
         "max_retries": settings.llm_max_retries,
+        "base_url": (base_url or "").strip() or DEFAULT_OPENAI_BASE_URL,
     }
-    if base_url:
-        kwargs["base_url"] = base_url
     return openai.OpenAI(**kwargs)
 
 

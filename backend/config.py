@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # 480 minutes = 8 hours (a full working day session)
     access_token_expire_minutes: int = 480
 
+    # Encrypts professors' own provider API keys at rest. Defaults to
+    # deriving from SECRET_KEY, which means rotating SECRET_KEY makes saved
+    # keys undecryptable and every professor must re-enter theirs. Set this
+    # explicitly if you expect to rotate the JWT secret.
+    credential_encryption_key: str = ""
+
     # ── File storage ──────────────────────────────────────────
     upload_dir: str = "./uploads"
     max_file_size_mb: int = 50

@@ -24,6 +24,12 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role          = Column(Enum(UserRole), default=UserRole.professor, nullable=False)
     is_active     = Column(Boolean, default=True, nullable=False)
+    # Which grading credentials this professor uses.
+    #   NULL          -> the administrator's server-wide provider (the default)
+    #   "openai" etc. -> this professor's own key, from provider_credentials
+    # Kept on the user rather than inferred from which keys exist, so adding
+    # a second key does not silently change which one grades.
+    preferred_provider = Column(String(30), nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at    = Column(DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow, nullable=False)

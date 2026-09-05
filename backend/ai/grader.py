@@ -210,6 +210,7 @@ def grade_submission(
     expected_solution: dict[str, Any] | None = None,
     include_images: bool = True,
     max_images: int = 4,
+    provider: Any = None,
 ) -> dict[str, Any]:
     """
     Grade one parsed submission against one validated rubric.
@@ -234,7 +235,11 @@ def grade_submission(
         # Figures are expensive; send only the first few.
         images = (parsed.get("images") or [])[:max_images]
 
-    ai_output, usage = get_provider().complete_json(
+    # `provider` lets a caller grade with a specific professor's own key
+    # (see credential_service.resolve_provider_for_user). When it is None the
+    # administrator's server-wide provider is used, which is the default and
+    # the only behaviour that existed before BYOK.
+    ai_output, usage = (provider or get_provider()).complete_json(
         system=prompts.GRADING_SYSTEM,
         user_prompt=user_prompt,
         schema=prompts.GRADING_RESPONSE_SCHEMA,

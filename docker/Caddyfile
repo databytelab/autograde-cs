@@ -6,6 +6,11 @@
 # trial run and for production.
 
 {
+	# Must never be empty: a bare `email` directive is a parse error and the
+	# container crash-loops. Caddy's own `{$VAR:default}` does not help,
+	# because it substitutes only when the variable is *unset* and compose
+	# passes it through as an empty string - so the default is applied in
+	# docker-compose.prod.yml instead, where `:-` does treat empty as unset.
 	email {$ACME_EMAIL}
 	# Do not advertise the server software in responses.
 	servers {

@@ -18,7 +18,9 @@ from fastapi.responses import JSONResponse
 from backend.ai.grader import GradingError
 from backend.config import settings
 from backend.parsers.base import ParseError
-from backend.routers import assignments, auth, courses, export, results, submissions
+from backend.routers import (
+    assignments, auth, courses, export, results, settings_providers, submissions,
+)
 from backend.services.rubric_service import RubricError
 from backend.utils.file_utils import FileTooLargeError, UnsupportedFileError, upload_root
 from backend.utils.logging_utils import configure_logging, log_event
@@ -188,6 +190,7 @@ app.include_router(assignments.router)
 app.include_router(submissions.router)
 app.include_router(results.router)
 app.include_router(export.router)
+app.include_router(settings_providers.router)
 
 
 @app.get("/api/health", tags=["health"])

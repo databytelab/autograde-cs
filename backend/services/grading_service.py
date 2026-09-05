@@ -107,6 +107,7 @@ def grade_one(
     rubric: dict[str, Any],
     *,
     include_images: bool = True,
+    provider: Any = None,
 ) -> GradeResult:
     """
     Parse (if needed), grade, and persist one submission.
@@ -140,6 +141,7 @@ def grade_one(
             assignment_description=assignment.description,
             expected_solution=expected,
             include_images=include_images,
+            provider=provider,
         )
     except GradingError as exc:
         submission.status = SubmissionStatus.ERROR
@@ -192,6 +194,7 @@ def grade_assignment(
     include_images: bool = True,
     on_progress: Callable[[dict[str, int]], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    provider: Any = None,
 ) -> dict[str, Any]:
     """
     Grade every eligible submission in an assignment.
@@ -261,7 +264,8 @@ def grade_assignment(
 
         try:
             grade = grade_one(
-                db, submission, assignment, rubric, include_images=include_images
+                db, submission, assignment, rubric,
+                include_images=include_images, provider=provider,
             )
         except (ParseError, GradingError) as exc:
             failed += 1

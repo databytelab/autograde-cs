@@ -54,3 +54,6 @@ build/
 # Node
 node_modules/
 .next/
+
+# Release smoke-test artifacts (throwaway stack)
+docker-compose.smoke.yml

@@ -223,10 +223,24 @@ def run_job(db: Session, job: GradingJob, worker_id: str | None = None) -> Gradi
             GradingJob.id == job.id).scalar()
         return current == JobStatus.CANCELLED
 
+    # Whose key pays for this run: the job's owner if they have chosen
+    # their own provider, otherwise the administrator's. Resolved once per
+    # job rather than per submission, so a batch cannot switch mid-run.
+    from backend.models.user import User
+    from backend.services.credential_service import resolve_provider_for_user
+
+    try:
+        provider = resolve_provider_for_user(db, db.get(User, job.user_id))
+    except Exception as exc:  # noqa: BLE001 - fall back rather than fail a batch
+        log_event("grading_job.provider_fallback", level="warning",
+                  job_id=job.id, error=type(exc).__name__)
+        provider = None
+
     params = job.params or {}
     try:
         summary = grade_assignment(
             db, assignment,
+            provider=provider,
             submission_ids=params.get("submission_ids"),
             regrade=bool(params.get("regrade")),
             include_images=bool(params.get("include_images", True)),

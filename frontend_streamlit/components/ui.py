@@ -109,6 +109,7 @@ WORKFLOW = [
     ("pages/upload_grade.py", "3 · Upload & grade", ":material/upload_file:"),
     ("pages/review_results.py", "4 · Review results", ":material/fact_check:"),
     ("pages/export.py", "5 · Export", ":material/download:"),
+    ("pages/settings_providers.py", "AI providers", ":material/key:"),
 ]
 
 

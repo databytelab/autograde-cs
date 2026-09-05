@@ -500,3 +500,53 @@ def test_apply_overrides_rejects_a_negative_score(db_session):
 
     with pytest.raises(ValueError, match="negative|below zero|at least 0"):
         apply_overrides(db_session, grade, {"c1": {"new_score": -5}})
+
+
+# ---------------------------------------------------------------------
+# Found by the release smoke test (Docker only)
+# ---------------------------------------------------------------------
+def test_openai_client_always_gets_an_explicit_base_url(monkeypatch):
+    """
+    .env ships OPENAI_BASE_URL blank. Under Docker, `env_file` exports that
+    blank value into the real process environment, where the OpenAI SDK
+    reads it as a base-URL override and builds a URL with no scheme - every
+    grading call then failed with "Connection error". Local development
+    never showed it, because pydantic-settings reads .env without exporting
+    anything to os.environ.
+    """
+    from backend.ai.providers import openai_provider
+
+    captured: dict = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(openai_provider, "openai",
+                        type("m", (), {"OpenAI": _FakeOpenAI}))
+    monkeypatch.setenv("OPENAI_BASE_URL", "")   # what Docker actually passes
+
+    openai_provider.make_client("sk-test", "")
+    assert captured["base_url"] == openai_provider.DEFAULT_OPENAI_BASE_URL
+    assert captured["base_url"].startswith("https://")
+
+
+def test_a_configured_gateway_base_url_is_still_honoured(monkeypatch):
+    """The override must keep working for Azure / OpenRouter / Ollama."""
+    from backend.ai.providers import openai_provider
+
+    captured: dict = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(openai_provider, "openai",
+                        type("m", (), {"OpenAI": _FakeOpenAI}))
+
+    openai_provider.make_client("k", "http://ollama:11434/v1")
+    assert captured["base_url"] == "http://ollama:11434/v1"
+
+    # whitespace-only is treated as unset, not as a URL
+    openai_provider.make_client("k", "   ")
+    assert captured["base_url"] == openai_provider.DEFAULT_OPENAI_BASE_URL
