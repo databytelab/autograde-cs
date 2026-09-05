@@ -333,3 +333,134 @@ def discover_local_models(base_url: str | None = None) -> dict[str, Any]:
                 "detail": f"Could not reach an Ollama server at {root}: "
                           f"{type(exc).__name__}",
                 "base_url": f"{root}/v1"}
+
+
+# ---------------------------------------------------------------------
+# Canvas credentials (per instructor)
+# ---------------------------------------------------------------------
+def get_canvas_credential(db: Session, user: User):
+    """This instructor's saved Canvas connection, if any."""
+    from backend.models.canvas_credential import CanvasCredential
+
+    return (
+        db.query(CanvasCredential)
+        .filter(CanvasCredential.user_id == user.id)
+        .first()
+    )
+
+
+def save_canvas_credential(db: Session, user: User, *, base_url: str,
+                           api_token: str | None = None):
+    """
+    Save or update this instructor's Canvas connection.
+
+    `api_token=None` keeps the stored token, so the URL can be corrected
+    without re-pasting it.
+    """
+    from backend.models.canvas_credential import CanvasCredential
+
+    base_url = (base_url or "").strip().rstrip("/")
+    if not base_url:
+        raise CredentialError(
+            "A Canvas URL is required, for example https://canvas.your-uni.edu"
+        )
+    if not base_url.startswith(("http://", "https://")):
+        raise CredentialError("The Canvas URL must start with https://")
+
+    credential = get_canvas_credential(db, user)
+    if credential is None:
+        if not (api_token or "").strip():
+            raise CredentialError("A Canvas access token is required.")
+        credential = CanvasCredential(user_id=user.id, base_url=base_url,
+                                      encrypted_token=b"")
+        db.add(credential)
+
+    credential.base_url = base_url
+    if api_token is not None and api_token.strip():
+        token = api_token.strip()
+        credential.encrypted_token = _encrypt(token)
+        credential.token_hint = token[-4:]
+    credential.last_tested_at = None
+    credential.last_test_ok = None
+    credential.last_test_detail = None
+    credential.canvas_user_name = None
+    credential.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(credential)
+    log_event("canvas_credential.saved", user_id=user.id, base_url=base_url)
+    return credential
+
+
+def delete_canvas_credential(db: Session, user: User) -> bool:
+    credential = get_canvas_credential(db, user)
+    if credential is None:
+        return False
+    db.delete(credential)
+    db.commit()
+    log_event("canvas_credential.deleted", user_id=user.id)
+    return True
+
+
+def canvas_credentials_for(db: Session, user: User | None):
+    """
+    The (base_url, token) this request should talk to Canvas with.
+
+    Falls back to the server-wide values in .env when the instructor has
+    not connected their own - which is what a single-instructor install
+    uses, and keeps every existing deployment working unchanged.
+    """
+    if user is None:
+        return None, None
+    credential = get_canvas_credential(db, user)
+    if credential is None or not credential.encrypted_token:
+        return None, None
+    return credential.base_url, _decrypt(credential.encrypted_token)
+
+
+def test_canvas_credential(db: Session, user: User):
+    """
+    Ask Canvas who this token belongs to.
+
+    `/users/self` is the cheapest call that proves the URL, the token and
+    the network path all work, and it returns a name the instructor can
+    recognise - so a token pasted from the wrong account is obvious.
+    """
+    import httpx
+
+    from backend.services import canvas_service
+
+    credential = get_canvas_credential(db, user)
+    if credential is None:
+        raise CredentialError("No Canvas connection saved yet.")
+
+    base_url, token = canvas_credentials_for(db, user)
+    ok, detail, who = True, "Connected.", None
+    try:
+        response = httpx.get(
+            f"{base_url}/api/v1/users/self",
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/json"},
+            timeout=canvas_service.REQUEST_TIMEOUT, follow_redirects=True,
+        )
+        if response.status_code == 401:
+            ok, detail = False, ("Canvas rejected the token. Generate a new "
+                                 "one under Account -> Settings.")
+        elif response.status_code >= 400:
+            ok, detail = False, f"Canvas returned {response.status_code}."
+        else:
+            who = response.json().get("name")
+            detail = f"Connected to {base_url} as {who}."
+    except Exception as exc:  # noqa: BLE001 - the message is the product here
+        ok = False
+        detail = f"Could not reach {base_url}: {type(exc).__name__}"
+
+    credential.last_tested_at = datetime.utcnow()
+    credential.last_test_ok = ok
+    credential.last_test_detail = detail[:400]
+    credential.canvas_user_name = who
+    db.commit()
+    db.refresh(credential)
+    log_event("canvas_credential.tested", user_id=user.id, ok=ok,
+              level="info" if ok else "warning")
+    return credential

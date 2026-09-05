@@ -11,10 +11,32 @@ until a professor finalizes it.
 
 ---
 
+## Install it in one command
+
+You need [Docker Desktop](https://docs.docker.com/get-docker/) and nothing
+else — no Python, no database, no web server. Download this project, open a
+terminal in its folder, and run:
+
+```bash
+./setup.sh          # macOS, Linux, Git Bash
+```
+
+```powershell
+.\setup.ps1         # Windows PowerShell
+```
+
+It generates its own secrets, asks the handful of questions it cannot guess,
+and starts everything. **The first account created becomes the
+administrator** — create yours before giving anyone else the address.
+Step-by-step, with screenshots of every prompt: **[INSTALL.md](INSTALL.md)**.
+
+---
+
 ## Documentation
 
 | Read this | If you are |
 |---|---|
+| **[INSTALL.md](INSTALL.md)** | Installing AutoGrade on a computer or a server for the first time. Starts from "what do I download?" |
 | **[USER_GUIDE.md](USER_GUIDE.md)** | An instructor using AutoGrade. Click-by-click, no technical knowledge needed. |
 | **[CHOOSING_YOUR_SETUP.md](CHOOSING_YOUR_SETUP.md)** | Deciding *where* to run it. Explains where student data goes and who can read it. **Read this before sharing with colleagues.** |
 | **[RUN_AND_SHARE.md](RUN_AND_SHARE.md)** | Running the server: install, start/stop, logs, backups, upgrades, AI providers, inviting people. |

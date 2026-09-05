@@ -13,6 +13,7 @@ from backend.models.grading_job     import (
     ACTIVE_STATUSES, TERMINAL_STATUSES, GradingJob, JobStatus,
 )
 from backend.models.login_attempt   import LoginAttempt
+from backend.models.canvas_credential import CanvasCredential
 from backend.models.provider_credential import (
     SUPPORTED_PROVIDERS, ProviderCredential,
 )
@@ -27,4 +28,5 @@ __all__ = [
     "GradingJob", "JobStatus", "ACTIVE_STATUSES", "TERMINAL_STATUSES",
     "LoginAttempt",
     "ProviderCredential", "SUPPORTED_PROVIDERS",
+    "CanvasCredential",
 ]

@@ -30,6 +30,10 @@ class User(Base):
     # Kept on the user rather than inferred from which keys exist, so adding
     # a second key does not silently change which one grades.
     preferred_provider = Column(String(30), nullable=True)
+    # The first account created on a fresh install. Can create accounts and
+    # reset passwords - the minimum needed to run an instance without
+    # anyone reaching for a database client.
+    is_admin      = Column(Boolean, default=False, nullable=False)
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at    = Column(DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow, nullable=False)

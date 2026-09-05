@@ -455,3 +455,57 @@ def discover_local_models(base_url: str | None = None):
     suffix = f"?base_url={base_url}" if base_url else ""
     return api_call("GET", f"/api/settings/providers/local/discover{suffix}",
                     quiet=True, timeout=15)
+
+
+# ---------------------------------------------------------------------
+# Settings - Canvas connection (one per instructor)
+# ---------------------------------------------------------------------
+def canvas_settings():
+    return api_call("GET", "/api/settings/canvas")
+
+
+def save_canvas_settings(base_url: str, api_token: str | None = None):
+    """`api_token=None` keeps the stored token while correcting the URL."""
+    payload: dict[str, Any] = {"base_url": base_url}
+    if api_token is not None:
+        payload["api_token"] = api_token
+    return api_call("PUT", "/api/settings/canvas", json=payload)
+
+
+def test_canvas_settings():
+    return api_call("POST", "/api/settings/canvas/test", timeout=60)
+
+
+def delete_canvas_settings():
+    return api_call("DELETE", "/api/settings/canvas")
+
+
+# ---------------------------------------------------------------------
+# Account and people
+# ---------------------------------------------------------------------
+def registration_status():
+    """Whether the sign-in page should offer "Create an account"."""
+    return api_call("GET", "/api/auth/registration-status", quiet=True)
+
+
+def change_password(current_password: str, new_password: str):
+    return api_call("POST", "/api/auth/change-password", json={
+        "current_password": current_password, "new_password": new_password})
+
+
+def list_users():
+    return api_call("GET", "/api/auth/users")
+
+
+def create_user(email: str, name: str, password: str, role: str = "professor"):
+    return api_call("POST", "/api/auth/users", json={
+        "email": email, "name": name, "password": password, "role": role})
+
+
+def reset_user_password(user_id: str, new_password: str):
+    return api_call("POST", f"/api/auth/users/{user_id}/reset-password",
+                    json={"new_password": new_password})
+
+
+def deactivate_user(user_id: str):
+    return api_call("POST", f"/api/auth/users/{user_id}/deactivate")

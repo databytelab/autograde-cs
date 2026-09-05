@@ -10,6 +10,7 @@ from backend.models.submission import Submission
 from backend.models.user import User
 from backend.routers.deps import get_owned_assignment
 from backend.services import canvas_service
+from backend.services.credential_service import canvas_credentials_for
 from backend.services.export_service import FORMATS, export
 from backend.utils.auth_utils import get_current_user, require_professor
 
@@ -56,19 +57,36 @@ def export_grades(
 # Canvas
 # ---------------------------------------------------------------------
 @router.get("/canvas/status", tags=["canvas"])
-def canvas_status(_user: User = Depends(get_current_user)) -> dict:
-    """Whether Canvas credentials are configured on this server."""
-    return {
-        "configured": canvas_service.is_configured(),
-        "base_url": canvas_service.settings.canvas_base_url or None,
-    }
+def canvas_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Whether *this instructor* can talk to Canvas.
+
+    Their own connection wins; a server-wide one in .env is the fallback,
+    which is what a single-instructor install uses.
+    """
+    base_url, token = canvas_credentials_for(db, current_user)
+    if base_url and token:
+        return {"configured": True, "base_url": base_url, "source": "personal"}
+    if canvas_service.settings.canvas_base_url and \
+            canvas_service.settings.canvas_api_token:
+        return {"configured": True,
+                "base_url": canvas_service.settings.canvas_base_url,
+                "source": "server"}
+    return {"configured": False, "base_url": None, "source": None}
 
 
 @router.get("/canvas/courses", tags=["canvas"])
-def canvas_courses(_user: User = Depends(get_current_user)) -> list[dict]:
+def canvas_courses(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
     """Canvas courses the configured token can teach."""
     try:
-        return canvas_service.list_courses()
+        with canvas_service.use_credentials(*canvas_credentials_for(db, current_user)):
+            return canvas_service.list_courses()
     except canvas_service.CanvasNotConfigured as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)
@@ -82,11 +100,13 @@ def canvas_courses(_user: User = Depends(get_current_user)) -> list[dict]:
 @router.get("/canvas/courses/{canvas_course_id}/assignments", tags=["canvas"])
 def canvas_assignments(
     canvas_course_id: str,
-    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Assignments in a Canvas course, for linking to a local assignment."""
     try:
-        return canvas_service.list_assignments(canvas_course_id)
+        with canvas_service.use_credentials(*canvas_credentials_for(db, current_user)):
+            return canvas_service.list_assignments(canvas_course_id)
     except canvas_service.CanvasNotConfigured as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)
@@ -101,6 +121,7 @@ def canvas_assignments(
 def sync_roster(
     assignment: Assignment = Depends(get_owned_assignment),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """
     Match this assignment's submissions against the Canvas roster.
@@ -117,7 +138,8 @@ def sync_roster(
         )
 
     try:
-        roster = canvas_service.get_roster(course.canvas_course_id)
+        with canvas_service.use_credentials(*canvas_credentials_for(db, current_user)):
+            roster = canvas_service.get_roster(course.canvas_course_id)
     except canvas_service.CanvasNotConfigured as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)
@@ -186,7 +208,7 @@ def _canvas_comment(grade) -> str:
 def push_grades(
     assignment: Assignment = Depends(get_owned_assignment),
     db: Session = Depends(get_db),
-    _professor: User = Depends(require_professor),
+    current_user: User = Depends(require_professor),
     only_finalized: bool = Query(
         True,
         description="Push only approved grades. Turn this off at your own risk.",
@@ -245,9 +267,10 @@ def push_grades(
                 "message": "Nothing to push. See `skipped` for why."}
 
     try:
-        outcome = canvas_service.push_grades_bulk(
-            course.canvas_course_id, assignment.canvas_assignment_id, payload
-        )
+        with canvas_service.use_credentials(*canvas_credentials_for(db, current_user)):
+            outcome = canvas_service.push_grades_bulk(
+                course.canvas_course_id, assignment.canvas_assignment_id, payload
+            )
     except canvas_service.CanvasNotConfigured as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)

@@ -2,7 +2,7 @@
 
 A practical guide for the person who runs the server. It assumes no prior
 Docker knowledge and gives exact commands. Your colleagues need none of
-this — they get a link and a password (see §7).
+this — they get a link and a password (see §8).
 
 `DEPLOYMENT.md` is the architectural reference; this is the operating
 manual.
@@ -30,7 +30,7 @@ Both must print a version. On Windows, Docker Desktop must be **running**
 
 > **Port check.** AutoGrade wants ports **80** and **443**. On this machine
 > they are currently taken by Apache (XAMPP). Either stop that service, or
-> change the ports — see §9.
+> change the ports — see §10.
 
 ---
 
@@ -307,25 +307,28 @@ Password: (the one you set for them)
 
 ### How to give them an account
 
-Registration is open, so **anyone who can reach the URL can create an
-account**. Two ways to handle that:
+Self sign-up is **closed** on a production instance
+(`ALLOW_OPEN_REGISTRATION=false`, the default). The only exception is the
+very first account on a fresh install, which becomes the administrator —
+so create yours the moment the server is up, before anyone else can reach
+the address.
 
-**Option A — you create the accounts (recommended for a pilot).**
-Do this before you share the link:
+After that, you make the accounts:
 
-```bash
-curl -k -X POST https://localhost/api/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"colleague@university.edu","name":"Dr Colleague",
-       "password":"a-long-password-you-generate","role":"professor"}'
-```
+1. Sign in as the administrator.
+2. **Settings → Account → People**.
+3. **Add a colleague**: name, university email, a long initial password,
+   role *professor*.
+4. Send them the URL, that email and that password, and ask them to change
+   it under **Settings → Account → Change password**.
 
-Send them that email and password, and ask them to change it. (There is no
-self-service password change yet — see "Remaining gaps" below.)
+The same page lets you **reset a forgotten password** and **deactivate**
+someone who has left — a deactivated account can no longer sign in, and
+their courses stay untouched.
 
-**Option B — they register themselves.** Send the link and tell them to
-choose "Create account". Simpler, but anyone with the link can sign up, so
-only do this on a university-internal network.
+If you would rather colleagues signed themselves up — sensible only on a
+network no one outside the university can reach — set
+`ALLOW_OPEN_REGISTRATION=true` in `.env` and restart.
 
 ### What each colleague sees
 
@@ -542,11 +545,10 @@ curl -k https://localhost/api/health
 
 Honest list of what is not there yet:
 
-* **No self-service password change or reset.** You set passwords and
-  distribute them; a forgotten password needs an administrator.
-* **Registration is open.** Anyone who can reach the URL can create an
-  account. Keep it on an internal network, or create the accounts
-  yourself.
+* **No reset-by-email.** People can change their own password once signed
+  in, but a *forgotten* one has to be reset by the administrator under
+  **Settings → Account → People**. On a self-hosted box with no mail
+  server, that is the honest trade.
 * **Sessions cannot be revoked** before their 8-hour expiry.
 * **Single host.** No redundancy — if the machine is down, AutoGrade is
   down. Backups protect the data, not the uptime.
@@ -566,8 +568,8 @@ Work down this list once. Tick every box before you send anyone a link.
 **Server**
 
 - [ ] Ports 80 and 443 are free — or the override in §10 applied
-- [ ] `git checkout v0.9.1-pilot`
-- [ ] `.env` created from `.env.example`, then `chmod 600 .env`
+- [ ] `./setup.sh` (or `.\setup.ps1`) run, **or** the values below set by
+      hand in `.env` copied from `.env.example`, then `chmod 600 .env`
 - [ ] `ENVIRONMENT=production`
 - [ ] `SECRET_KEY` generated (48+ random chars), **not** the placeholder
 - [ ] `CREDENTIAL_ENCRYPTION_KEY` set to its own value, so a future
@@ -585,7 +587,9 @@ Work down this list once. Tick every box before you send anyone a link.
 - [ ] `ps` shows six services; `api`, `db`, `frontend` report healthy
 - [ ] `curl https://<host>/api/health` returns 200 with `database_ok: true`
 - [ ] Sign-in page loads with a **valid** certificate (no browser warning)
-- [ ] You created **your own** account first, before sharing the URL
+- [ ] You created **your own** account first, before sharing the URL —
+      it is the administrator, and after it self sign-up is closed
+- [ ] Each colleague's account created under **Settings → Account → People**
 - [ ] One full run: course → assignment + rubric → upload → grade →
       review → override → approve → export
 - [ ] Grading still finishes after you close and reopen the browser
@@ -684,5 +688,80 @@ grade and comment but not approve a grade or delete a course.
 * Submissions are sent to the configured AI provider - say which one, and
   that the work is not used to train models.
 * Use last term's coursework during the pilot, not live grading.
-* There is no password reset yet; they email you if they get locked out.
+* If they get locked out, you reset their password under
+  **Settings → Account → People** — there is no reset-by-email on a
+  self-hosted box.
 * Data is backed up nightly - tell them the recovery window.
+
+---
+
+## 15. Handing the package to another department
+
+Everything above assumes *you* run the server. The other model is that you
+hand the whole thing over — another department runs it on their own
+hardware, with their own AI key and their own Canvas token, and nothing of
+theirs ever reaches you. That is the strongest possible answer to "will our
+student data leave the building?": no.
+
+### Build the bundle
+
+```bash
+python scripts/package_release.py
+```
+
+This writes `dist/autograde-<version>.zip` from **committed files only**,
+then re-opens the archive and refuses to ship if anything inside looks like
+a live OpenAI key, Anthropic key, Canvas token or private key. Your `.env`,
+your database, your `uploads/` and your virtualenv are untracked or
+ignored, so they cannot travel with it by accident — but the check is there
+because "cannot" and "did not" are different claims.
+
+Tag first if this is a release, so the ZIP carries a version rather than a
+commit id:
+
+```bash
+git tag -a v0.9.2-pilot -m "Installable bundle"
+python scripts/package_release.py
+```
+
+### What you send
+
+| | |
+|---|---|
+| `autograde-<version>.zip` | The software |
+| **[INSTALL.md](INSTALL.md)** | Already inside the ZIP. Point at it in your covering email — it starts from "install Docker" |
+| One sentence | *Unzip it, open a terminal in the folder, run `setup.sh` (or `setup.ps1` on Windows).* |
+
+### What they need before they start
+
+* A machine that stays on — a small VM or a spare desktop is plenty.
+* Docker Desktop or Docker Engine.
+* An OpenAI or Anthropic key **of their own**, or Ollama on the same
+  machine if they would rather pay nothing per use.
+* A hostname, if colleagues will reach it from other machines.
+
+They do not need Python, PostgreSQL, a web server, or any knowledge of any
+of them. `setup.sh` generates every secret itself.
+
+### What stays yours to answer
+
+The software installs itself; the questions that follow are the work:
+
+* Their AI key does not work, or costs more than they expected (§9).
+* Canvas rejects the token, or the course is not in the list (§7 of
+  `INSTALL.md`).
+* They want the local-model route and need help sizing a machine for it.
+* Backups, restore drills, and upgrades to a later version (§6, §7).
+* Rubric quality — by far the biggest lever on grading accuracy, and the
+  one thing no installer can do for them.
+
+### Licence
+
+The repository ships under **MIT** (see `LICENSE`), which permits anyone
+who receives the bundle to pass it on freely. That does not undercut the
+model — what you are selling is installation, configuration, support and
+upgrades, not exclusivity. If you would rather the code itself were not
+redistributable, the licence has to change *before* the first customer
+receives a copy; a permissive grant already given cannot be withdrawn from
+that copy.
+

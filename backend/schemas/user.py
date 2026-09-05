@@ -34,6 +34,8 @@ class UserOut(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+
+    is_admin: bool = False
     role: UserRole
     is_active: bool
     created_at: datetime
@@ -44,3 +46,22 @@ class Token(BaseModel):
     token_type: str = "bearer"
     expires_in_minutes: int
     user: UserOut
+
+
+class PasswordChange(BaseModel):
+    """Change your own password. The current one is required."""
+    current_password: str
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
+
+
+class AdminUserCreate(BaseModel):
+    """An administrator creating an account for a colleague."""
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
+    role: UserRole = UserRole.professor
+
+
+class AdminPasswordReset(BaseModel):
+    """An administrator setting a new password for someone who is locked out."""
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)

@@ -1,0 +1,19 @@
+# Line endings.
+#
+# Shell scripts run inside Linux containers, or under Git Bash on Windows.
+# Both break on CRLF — a container entrypoint with \r fails to exec at all,
+# and bash reports `$'\r': command not found`. A Windows customer cloning
+# with core.autocrlf=true would otherwise get exactly that on first run, so
+# these files are pinned to LF regardless of anyone's git settings.
+*.sh            text eol=lf
+Dockerfile*     text eol=lf
+Caddyfile       text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.env.example    text eol=lf
+
+# PowerShell is the other way round.
+*.ps1           text eol=crlf
+
+# Let git decide for everything else.
+*               text=auto

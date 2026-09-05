@@ -22,6 +22,9 @@ PAGES = {
     "upload_grade": FRONTEND / "pages" / "upload_grade.py",
     "review_results": FRONTEND / "pages" / "review_results.py",
     "export": FRONTEND / "pages" / "export.py",
+    "settings_providers": FRONTEND / "pages" / "settings_providers.py",
+    "settings_canvas": FRONTEND / "pages" / "settings_canvas.py",
+    "settings_account": FRONTEND / "pages" / "settings_account.py",
 }
 
 
@@ -171,6 +174,23 @@ class FakeBackend:
 
     def export_bytes(self, assignment_id, fmt, only_finalized=False):
         return b"col\n1\n", f"grades.{fmt}"
+
+    # -- settings pages --
+    def provider_settings(self):
+        return {"supported": ["openai", "anthropic", "local"],
+                "credentials": [], "preferred_provider": None,
+                "using_administrator": True,
+                "administrator_provider": "openai",
+                "administrator_available": self.anthropic_configured}
+
+    def canvas_settings(self):
+        return {"connected": False, "base_url": None, "masked_token": "",
+                "canvas_user_name": None, "last_tested_at": None,
+                "last_test_ok": None, "last_test_detail": None,
+                "server_fallback_available": self.canvas_configured}
+
+    def list_users(self):
+        return [dict(USER, is_admin=True)]
 
     def __getattr__(self, name):
         """Any other call returns a benign truthy dict."""

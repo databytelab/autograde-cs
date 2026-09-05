@@ -110,6 +110,8 @@ WORKFLOW = [
     ("pages/review_results.py", "4 · Review results", ":material/fact_check:"),
     ("pages/export.py", "5 · Export", ":material/download:"),
     ("pages/settings_providers.py", "AI providers", ":material/key:"),
+    ("pages/settings_canvas.py", "Canvas", ":material/school:"),
+    ("pages/settings_account.py", "Account", ":material/person:"),
 ]
 
 

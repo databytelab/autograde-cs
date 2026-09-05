@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     # for direct browser access (Swagger, a future JS client).
     cors_origins: str = "http://localhost:8501,http://localhost:3000"
 
+    # Whether anyone who can reach the sign-in page may create an account.
+    # Default False, so a shipped instance is closed even if whoever
+    # installed it never read this file. `registration_is_open()` keeps
+    # development and the test-suite frictionless. The very first account
+    # is always allowed regardless - otherwise a fresh install could never
+    # be set up.
+    allow_open_registration: bool = False
+
     # ── App ───────────────────────────────────────────────────
     environment: str = "development"
     app_name: str = "AutoGrade CS"
@@ -108,6 +116,17 @@ class Settings(BaseSettings):
 
     def is_production(self) -> bool:
         return self.environment.strip().lower() in ("production", "prod", "staging")
+
+    def registration_is_open(self) -> bool:
+        """
+        Whether self sign-up is allowed right now.
+
+        Safe by default: a production instance is closed unless someone
+        deliberately opened it, so an installer who never edited .env still
+        ends up with an instance strangers cannot join. Development and
+        tests stay open, where creating accounts freely is the point.
+        """
+        return bool(self.allow_open_registration) or not self.is_production()
 
     def is_testing(self) -> bool:
         return self.environment.strip().lower() in ("test", "testing")

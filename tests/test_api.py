@@ -793,7 +793,11 @@ def test_canvas_status_reports_unconfigured(client, professor):
 def test_canvas_endpoints_return_501_when_unconfigured(client, professor):
     response = client.get("/api/canvas/courses", headers=professor["headers"])
     assert response.status_code == 501
-    assert "not configured" in response.json()["detail"]
+    detail = response.json()["detail"]
+    # The message must point at both ways to fix it: the per-instructor
+    # connection in the UI, and the server-wide fallback in .env.
+    assert "not connected" in detail
+    assert "Settings" in detail and "CANVAS_BASE_URL" in detail
 
 
 def test_canvas_push_requires_ids(client, professor, assignment, graded):

@@ -191,6 +191,7 @@ app.include_router(submissions.router)
 app.include_router(results.router)
 app.include_router(export.router)
 app.include_router(settings_providers.router)
+app.include_router(settings_providers.canvas_router)
 
 
 @app.get("/api/health", tags=["health"])

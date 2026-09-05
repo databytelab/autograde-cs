@@ -201,3 +201,112 @@ def discover_local(
     comes back here is what *this deployment* can see.
     """
     return credential_service.discover_local_models(base_url)
+
+
+# ---------------------------------------------------------------------
+# Settings -> Canvas (one connection per instructor)
+# ---------------------------------------------------------------------
+canvas_router = APIRouter(prefix="/api/settings/canvas", tags=["canvas settings"])
+
+
+class CanvasSettingsOut(BaseModel):
+    connected: bool = False
+    base_url: str | None = None
+    masked_token: str = ""
+    canvas_user_name: str | None = None
+    last_tested_at: datetime | None = None
+    last_test_ok: bool | None = None
+    last_test_detail: str | None = None
+    # True when the server has a shared connection in .env, which a
+    # single-instructor install uses instead of a personal one.
+    server_fallback_available: bool = False
+
+
+class CanvasSettingsIn(BaseModel):
+    base_url: str
+    # Omit to keep the stored token while correcting the URL.
+    api_token: str | None = None
+
+
+def _canvas_out(credential, ) -> CanvasSettingsOut:
+    fallback = bool(settings.canvas_base_url and settings.canvas_api_token)
+    if credential is None:
+        return CanvasSettingsOut(server_fallback_available=fallback)
+    return CanvasSettingsOut(
+        connected=True,
+        base_url=credential.base_url,
+        masked_token=credential.masked_token,
+        canvas_user_name=credential.canvas_user_name,
+        last_tested_at=credential.last_tested_at,
+        last_test_ok=credential.last_test_ok,
+        last_test_detail=credential.last_test_detail,
+        server_fallback_available=fallback,
+    )
+
+
+@canvas_router.get("", response_model=CanvasSettingsOut)
+def get_canvas_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CanvasSettingsOut:
+    """This instructor's Canvas connection. The token is never returned."""
+    return _canvas_out(credential_service.get_canvas_credential(db, current_user))
+
+
+@canvas_router.put("", response_model=CanvasSettingsOut)
+def save_canvas_settings(
+    payload: CanvasSettingsIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CanvasSettingsOut:
+    """
+    Connect Canvas, or correct the URL.
+
+    A Canvas token acts as the person who created it, so it belongs to the
+    instructor and not to the server: on a shared instance one token cannot
+    write grades into somebody else's course.
+    """
+    try:
+        credential = credential_service.save_canvas_credential(
+            db, current_user, base_url=payload.base_url,
+            api_token=payload.api_token,
+        )
+    except CredentialError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    return _canvas_out(credential)
+
+
+@canvas_router.post("/test", response_model=CanvasSettingsOut)
+def test_canvas_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CanvasSettingsOut:
+    """
+    Ask Canvas who this token belongs to.
+
+    Returns the account name, so a token pasted from the wrong login is
+    obvious before any grades are pushed anywhere.
+    """
+    try:
+        credential = credential_service.test_canvas_credential(db, current_user)
+    except CredentialError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    return _canvas_out(credential)
+
+
+@canvas_router.delete("", response_model=CanvasSettingsOut)
+def delete_canvas_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CanvasSettingsOut:
+    """Disconnect Canvas. Grades already pushed are unaffected."""
+    if not credential_service.delete_canvas_credential(db, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Canvas connection saved.",
+        )
+    return _canvas_out(None)

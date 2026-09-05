@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Iterator
 
 import httpx
@@ -46,16 +48,54 @@ class CanvasNotConfigured(CanvasError):
     """Raised when Canvas credentials are missing from .env."""
 
 
+# The credentials in force for the current request.
+#
+# Canvas is per-instructor: a department instance has several professors,
+# each teaching their own Canvas courses, and one shared server token
+# cannot write grades into another professor's course. A router resolves
+# the signed-in instructor's own token and installs it here for the
+# duration of the call; everything below reads it through
+# `_require_config`, so no Canvas function needed a new argument.
+#
+# A ContextVar (not a module global) because it must not leak between
+# concurrently-served requests.
+_active_credentials: ContextVar[tuple[str, str] | None] = ContextVar(
+    "canvas_credentials", default=None,
+)
+
+
+@contextmanager
+def use_credentials(base_url: str | None, token: str | None):
+    """
+    Run a block against one instructor's Canvas credentials.
+
+    Passing None/None falls through to the server-wide values in .env,
+    which is what a single-instructor install uses.
+    """
+    resolved = (base_url.rstrip("/"), token) if (base_url and token) else None
+    reset = _active_credentials.set(resolved)
+    try:
+        yield
+    finally:
+        _active_credentials.reset(reset)
+
+
 def is_configured() -> bool:
-    """True when both CANVAS_BASE_URL and CANVAS_API_TOKEN are set."""
+    """True when Canvas credentials are available for this request."""
+    if _active_credentials.get() is not None:
+        return True
     return bool(settings.canvas_base_url and settings.canvas_api_token)
 
 
 def _require_config() -> tuple[str, str]:
-    if not is_configured():
+    active = _active_credentials.get()
+    if active is not None:
+        return active
+    if not (settings.canvas_base_url and settings.canvas_api_token):
         raise CanvasNotConfigured(
-            "Canvas is not configured. Set CANVAS_BASE_URL and "
-            "CANVAS_API_TOKEN in your .env file - see docs/canvas_setup.md."
+            "Canvas is not connected. Add your Canvas URL and access token "
+            "under Settings -> Canvas, or set CANVAS_BASE_URL and "
+            "CANVAS_API_TOKEN in .env - see docs/canvas_setup.md."
         )
     return settings.canvas_base_url.rstrip("/"), settings.canvas_api_token
 
