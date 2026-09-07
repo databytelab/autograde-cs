@@ -24,3 +24,9 @@ Caddyfile       text eol=lf
 # Development-only files, kept out of the ZIP a professor receives.
 .github/            export-ignore
 frontend/           export-ignore
+# The dev launcher needs a venv and the source tree, neither of which a
+# professor has - and a second "Start" file in that folder is a question
+# nobody should have to ask. Wildcards because git attribute patterns
+# cannot contain a space.
+*Dev.bat            export-ignore
+scripts/dev.ps1     export-ignore
