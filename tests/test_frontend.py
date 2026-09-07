@@ -597,3 +597,15 @@ def test_the_shared_key_is_described_differently_to_its_owner(fake_backend):
     owner = page_text(run_page(PAGES["settings_providers"], is_admin=True))
     assert "goes to them, not to you" not in owner
     assert "settings file" in owner
+
+
+def test_the_sidebar_names_the_key_correctly_for_each_reader(fake_backend):
+    """The status line had the same "shared account" problem as the page."""
+    fake_backend(anthropic_configured=True)
+
+    colleague = page_text(run_page(PAGES["dashboard"], is_admin=False))
+    assert "the shared OpenAI account" in colleague
+
+    owner = page_text(run_page(PAGES["dashboard"], is_admin=True))
+    assert "the OpenAI key on this computer" in owner
+    assert "shared" not in owner.split("Ready to grade")[1][:80]

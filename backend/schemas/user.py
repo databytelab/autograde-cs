@@ -33,6 +33,17 @@ class UserLogin(BaseModel):
 class UserOut(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
+    # A plain string on the way out, deliberately, even though `UserBase`
+    # validates it strictly on the way in.
+    #
+    # Re-validating a value we already stored turns one odd row into a 500
+    # for the whole endpoint. It did: an account seeded long ago with a
+    # `.local` address - a reserved TLD that email-validator refuses -
+    # made GET /api/auth/users fail entirely, so an administrator could not
+    # see or manage *any* account. Input validation is where an address is
+    # judged; output is where it is reported.
+    email: str
+
     id: str
 
     is_admin: bool = False

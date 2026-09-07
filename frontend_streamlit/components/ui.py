@@ -43,7 +43,7 @@ PROVIDER_NAMES = {
 }
 
 
-def user_grading_status() -> dict[str, Any]:
+def user_grading_status(viewer_is_admin: bool = False) -> dict[str, Any]:
     """
     Whether *this user* can grade, and with what.
 
@@ -67,6 +67,13 @@ def user_grading_status() -> dict[str, Any]:
                 "how": f"your own {PROVIDER_NAMES.get(preferred, preferred)} account"}
     if settings.get("administrator_available"):
         name = PROVIDER_NAMES.get(settings.get("administrator_provider", ""), "")
+        # "the shared account" is what a colleague on a department server
+        # is using. The administrator is looking at their own key in their
+        # own settings file, and being told it is somebody else's is
+        # simply wrong.
+        if viewer_is_admin:
+            return {"ready": True,
+                    "how": f"the {name} key on this computer".replace("  ", " ")}
         return {"ready": True, "how": f"the shared {name} account".rstrip()}
     return {"ready": False, "how": None}
 
@@ -192,13 +199,13 @@ _PROVIDER_LABEL = {
 }
 
 
-def _backend_status_line() -> None:
+def _backend_status_line(viewer_is_admin: bool = False) -> None:
     """Shared sidebar footer: is the API reachable, can this user grade?"""
     if api_client.health() is None:
         st.error("AutoGrade is not answering. Use Restart AutoGrade.")
         return
 
-    grading = user_grading_status()
+    grading = user_grading_status(viewer_is_admin)
     if grading["ready"]:
         st.success(f"Ready to grade - using {grading['how']}")
     else:
@@ -221,7 +228,7 @@ def render_sidebar(user: dict[str, Any]) -> None:
         _settings_links()
 
         st.divider()
-        _backend_status_line()
+        _backend_status_line(bool(user.get("is_admin")))
 
         if st.button("Sign out", use_container_width=True):
             api_client.logout()

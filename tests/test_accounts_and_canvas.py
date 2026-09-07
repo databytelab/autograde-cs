@@ -342,3 +342,39 @@ def test_production_closes_signup_by_default():
     # ...but a local install and the test-suite stay frictionless.
     assert Settings(environment="development",
                     _env_file=None).registration_is_open() is True
+
+
+def test_one_odd_address_does_not_break_the_whole_people_list(
+        client, db_session):
+    """
+    UserOut re-validated the email on the way *out*, so a single account
+    whose address the validator dislikes - a `.local` one seeded long ago -
+    made GET /api/auth/users return 500. The administrator could then see
+    and manage no accounts at all, with no clue why.
+    """
+    from backend.models.user import User, UserRole
+    from backend.utils.auth_utils import hash_password
+
+    admin = _register(client, "admin@uni.edu")
+    admin_headers = _headers(admin)
+
+    # Straight into the database, the way a seed script would - the API's
+    # own validation would never let this address in.
+    db_session.add(User(email="demo@autograde.local", name="Dr Demo",
+                        role=UserRole.professor,
+                        password_hash=hash_password("a-good-password-here"),
+                        is_active=True))
+    db_session.commit()
+
+    listed = client.get("/api/auth/users", headers=admin_headers)
+    assert listed.status_code == 200, listed.text
+    assert "demo@autograde.local" in {u["email"] for u in listed.json()}
+
+
+def test_a_bad_address_is_still_refused_on_the_way_in(client):
+    """Relaxing the response model must not relax the request model."""
+    _register(client, "admin@uni.edu")
+    refused = client.post("/api/auth/register", json={
+        "email": "not-an-email", "name": "X", "password": "a-good-password",
+        "role": "professor"})
+    assert refused.status_code == 422
