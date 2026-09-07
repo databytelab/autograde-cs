@@ -250,12 +250,12 @@ def page_text(app) -> str:
             parts.append(str(getattr(widget, "label", "")))
     return "\n".join(parts)
 
-def run_page(path: Path, *, signed_in: bool = True,
+def run_page(path: Path, *, signed_in: bool = True, is_admin: bool = False,
              session_state: dict | None = None) -> AppTest:
     app = AppTest.from_file(str(path), default_timeout=30)
     if signed_in:
         app.session_state["token"] = "fake-token"
-        app.session_state["user"] = USER
+        app.session_state["user"] = dict(USER, is_admin=is_admin)
     for key, value in (session_state or {}).items():
         app.session_state[key] = value
     return app.run()
@@ -580,3 +580,20 @@ def test_the_export_page_lets_you_set_the_canvas_ids(fake_backend):
     assert "Canvas assignment ID" in labels
     assert "Save Canvas IDs" in {b.label for b in app.button}
     assert "via the API" not in page_text(app)
+
+
+def test_the_shared_key_is_described_differently_to_its_owner(fake_backend):
+    """
+    "The cost goes to them, not to you" is true for a colleague on a shared
+    server and nonsense for the administrator reading it on their own
+    machine - they are them.
+    """
+    fake_backend(anthropic_configured=True)
+
+    colleague = page_text(run_page(PAGES["settings_providers"], is_admin=False))
+    assert "goes to them, not to you" in colleague
+    assert "shared account on this server" in colleague
+
+    owner = page_text(run_page(PAGES["settings_providers"], is_admin=True))
+    assert "goes to them, not to you" not in owner
+    assert "settings file" in owner

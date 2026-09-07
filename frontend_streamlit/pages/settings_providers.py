@@ -13,7 +13,7 @@ from frontend_streamlit.components import api_client
 from frontend_streamlit.components.ui import page_setup, require_auth
 
 page_setup("AI providers")
-require_auth()
+user = require_auth()
 
 st.title("AI providers")
 st.caption(
@@ -26,6 +26,11 @@ if data is None:
     st.stop()
 
 by_provider = {c["provider"]: c for c in data["credentials"]}
+# On a shared server the key in the settings file belongs to somebody else,
+# and saying so is the useful thing. On a single-professor install the
+# administrator is the reader, so "the cost goes to them, not to you" is
+# nonsense - they are them.
+viewer_is_admin = bool(user.get("is_admin"))
 server_available = bool(data["administrator_available"])
 preferred = data["preferred_provider"]
 
@@ -89,6 +94,12 @@ if preferred and by_provider.get(preferred):
     detail = saved["model"] or "the default model"
     st.success(f"**Grading is set up.** Using {_active_label()}, model "
                f"`{detail}`.", icon=":material/check_circle:")
+elif server_available and viewer_is_admin:
+    st.success(
+        f"**Grading is set up.** Using the "
+        f"{NAMES.get(data['administrator_provider'], '')} key configured on "
+        "this computer, in its settings file.",
+        icon=":material/check_circle:")
 elif server_available:
     st.success(f"**Grading is set up.** Using {_active_label()}. You do not "
                "need an account of your own.", icon=":material/check_circle:")
@@ -355,15 +366,29 @@ with local_tab:
 # ---------------------------------------------------------------------
 if server_available:
     st.divider()
-    st.subheader("The shared account on this server")
     admin_name = NAMES.get(data["administrator_provider"],
                            data["administrator_provider"])
-    st.caption(f"Whoever runs this server has set up a shared {admin_name} "
-               "account. You can use it instead of your own key; the cost "
-               "goes to them, not to you.")
+    if viewer_is_admin:
+        st.subheader("The key in this installation's settings file")
+        st.caption(
+            f"A {admin_name} key is configured on this computer, in the "
+            "settings file the installer wrote. Grading uses it unless you "
+            "save a key of your own above. Both are billed to whichever "
+            f"{admin_name} account the key belongs to."
+        )
+        switch_label = "Go back to the settings-file key"
+    else:
+        st.subheader("The shared account on this server")
+        st.caption(
+            f"Whoever runs this server has set up a shared {admin_name} "
+            "account. You can use it instead of your own key; the cost goes "
+            "to them, not to you."
+        )
+        switch_label = "Use the shared account instead"
+
     if preferred is None:
         st.info("You are using it now.", icon=":material/check:")
-    elif st.button("Use the shared account instead"):
+    elif st.button(switch_label):
         if api_client.set_provider_preference(None):
             st.success("Switched.")
             st.rerun()
