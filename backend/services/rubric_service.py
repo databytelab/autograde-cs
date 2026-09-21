@@ -286,6 +286,7 @@ def _scale_criteria_to_total(rubric: dict[str, Any], target: float) -> dict[str,
 def build_rubric_from_solution(
     parsed: dict[str, Any],
     total_points: float | None = None,
+    instructions: str | None = None,
     provider: Any = None,
 ) -> dict[str, Any]:
     """
@@ -293,13 +294,17 @@ def build_rubric_from_solution(
 
     The model reads the worked solution and derives criteria that judge the
     underlying work rather than an exact match, since student code and output
-    legitimately vary. When a total is requested, the criterion points are
-    rescaled to sum to it exactly. The AI call is imported lazily so importing
-    this module never requires an API key.
+    legitimately vary. `instructions` is optional free text from the
+    professor - anything the solution file cannot show on its own - and
+    takes priority over what the model would otherwise infer. When a total
+    is requested, the criterion points are rescaled to sum to it exactly.
+    The AI call is imported lazily so importing this module never requires
+    an API key.
     """
     from backend.ai.grader import extract_rubric_from_solution  # local import
 
     extracted = extract_rubric_from_solution(parsed, total_points=total_points,
+                                             instructions=instructions,
                                              provider=provider)
     if total_points:
         extracted = _scale_criteria_to_total(extracted, total_points)

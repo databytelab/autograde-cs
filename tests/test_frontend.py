@@ -428,32 +428,121 @@ def test_upload_page_offers_grading_when_configured(fake_backend):
 # ---------------------------------------------------------------------
 # Review results
 # ---------------------------------------------------------------------
-def test_review_page_lists_every_result(fake_backend):
+def _set_radio(app, key, value):
+    for widget in app.radio:
+        if widget.key == key:
+            return widget.set_value(value).run()
+    raise AssertionError(f"no radio with key {key}")
+
+
+def test_review_page_shows_one_submission_and_filters_by_status(fake_backend):
+    """
+    The queue shows one submission at a time (that is what keeps a big class
+    fast), and the status filter chooses which submissions are in the queue.
+    """
     fake_backend()
     app = run_page(PAGES["review_results"])
     assert not app.exception
-    rendered = " ".join(str(m.value) for m in app.markdown)
-    assert "Alice Chen" in rendered or any(
-        "Alice Chen" in str(e) for e in app.get("expander")
-    )
+    # Default "Needs approval" -> the open submission (Bob) is shown.
+    assert "Bob Smith" in page_text(app)
+    # Switching to "Approved" brings up the finalized one (Alice).
+    app = _set_radio(app, "rr_filter_a1", "Approved")
+    assert not app.exception
+    assert "Alice Chen" in page_text(app)
 
 
 def test_review_page_locks_scores_on_an_approved_grade(fake_backend):
-    """A finalized grade must not present editable score inputs."""
+    """A finalized grade shows its scores but never lets you edit them."""
     fake_backend()
     app = run_page(PAGES["review_results"])
     assert not app.exception
 
-    # g1 is finalized, g2 is not - the finalized one's inputs are disabled.
-    finalized_inputs = [
-        n for n in app.number_input if n.key and n.key.startswith("score_g1_")
-    ]
+    # Default filter shows the open submission (g2) - it is editable.
     open_inputs = [
         n for n in app.number_input if n.key and n.key.startswith("score_g2_")
     ]
+    assert open_inputs, "an open result should show editable scores"
+    assert all(not n.disabled for n in open_inputs)
+
+    # The approved submission (g1) shows its scores, disabled.
+    app = _set_radio(app, "rr_filter_a1", "Approved")
+    finalized_inputs = [
+        n for n in app.number_input if n.key and n.key.startswith("score_g1_")
+    ]
     assert finalized_inputs, "the approved result should still show its scores"
     assert all(n.disabled for n in finalized_inputs)
-    assert all(not n.disabled for n in open_inputs)
+
+
+def test_review_page_can_bulk_approve_unflagged(fake_backend, monkeypatch):
+    """
+    'Approve all' clears the graded, unflagged, not-yet-approved backlog in
+    one confirmed click, and never touches flagged ones.
+    """
+    fake_backend()
+    from frontend_streamlit.components import api_client
+
+    clean = {**RESULTS[1], "id": "g3", "flags": [], "finalized": False,
+             "student_name": "Carol Ng"}
+    monkeypatch.setattr(api_client, "list_results", lambda *a, **k: [clean])
+    seen: dict = {}
+    monkeypatch.setattr(
+        api_client, "finalize_all",
+        lambda aid, skip_flagged=True: (seen.update(aid=aid, skip=skip_flagged)
+                                        or {"finalized": 1}),
+    )
+
+    app = run_page(PAGES["review_results"])
+    approve = [b for b in app.button if b.label and "Approve all" in b.label]
+    assert approve, "a graded, unflagged, unapproved result should offer bulk approve"
+
+    app = approve[0].click().run()
+    yes = [b for b in app.button if b.label and "Yes, approve" in b.label]
+    assert yes, "bulk approve must confirm before acting"
+    yes[0].click().run()
+    assert seen == {"aid": "a1", "skip": True}
+
+
+def test_review_page_offers_a_direct_final_score(fake_backend):
+    """
+    An editable result must let the professor enter a final score in one
+    field, without touching every section - the fast path for a submission
+    graded by hand.
+    """
+    fake_backend()
+    app = run_page(PAGES["review_results"])
+    assert not app.exception
+
+    # g2 is not finalized - it offers the direct final-score input.
+    total_inputs = [
+        n for n in app.number_input if n.key and n.key.startswith("total_g2")
+    ]
+    assert total_inputs, "an editable result should offer a final-score field"
+    labels = " ".join(str(m.value) for m in app.markdown)
+    assert "Final score" in labels
+
+
+def test_review_page_locks_sections_under_a_manual_total(fake_backend, monkeypatch):
+    """
+    Once a manual final score is set, the section scores are shown but
+    disabled (they no longer drive the total), and the page says so.
+    """
+    fake_backend()
+    from frontend_streamlit.components import api_client
+
+    manual = {**RESULTS[1], "id": "g2", "total_override": 42.0,
+              "effective_score": 42.0, "finalized": False}
+    monkeypatch.setattr(api_client, "list_results", lambda *a, **k: [manual])
+
+    app = run_page(PAGES["review_results"])
+    assert not app.exception
+
+    section_inputs = [
+        n for n in app.number_input if n.key and n.key.startswith("score_g2_")
+    ]
+    assert section_inputs, "sections should still be visible under a manual total"
+    assert all(n.disabled for n in section_inputs)
+    infos = " ".join(str(i.value) for i in app.info)
+    assert "manual final score" in infos.lower()
 
 
 # ---------------------------------------------------------------------

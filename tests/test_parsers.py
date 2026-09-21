@@ -290,3 +290,193 @@ def test_html_without_a_figure_reports_zero(tmp_path):
     parsed = parse_submission(str(f))
     assert parsed["stats"]["n_figures"] == 0
     assert parsed["cells"][0]["n_figures"] == 0
+
+
+# ---------------------------------------------------------------------
+# Third-party ".ipynb to HTML" converters - none of these are nbconvert,
+# and each names its classes differently. Real student submissions in
+# this shape used to come back completely empty: the cell wrapper matched
+# structurally, so the classic-template parser claimed success, but its
+# selectors were nbconvert-specific and found no source or output in any
+# cell - a submission silently graded as blank.
+# ---------------------------------------------------------------------
+def test_html_runcell_style_export(tmp_path):
+    """
+    runcell.dev's export wraps each cell's execution-count label in a
+    class containing "input-prompt" / "output-prompt" - which contain the
+    substring "input", so a naive class match picks the *label* ("In
+    [2]:") as the source instead of the code, and stripping the prompt
+    text then leaves the cell looking empty.
+    """
+    from backend.parsers import parse_submission
+
+    html = """<!DOCTYPE html><html><body>
+    <div class="notebook-container">
+      <div class="cell cell-code">
+        <div class="cell-prompt input-prompt">In [2]:</div>
+        <div class="cell-content">
+          <div class="input-area"><pre>import numpy as np
+print("Setup complete.")</pre></div>
+          <div class="output-area">
+            <div class="output-wrapper">
+              <div class="cell-prompt output-prompt"></div>
+              <div class="output-content">
+                <div class="output-stream">Setup complete.
+</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cell cell-markdown">
+        <div class="cell-prompt prompt-empty">&nbsp;</div>
+        <div class="cell-content">
+          <div class="markdown-cell"><h2>Step 1</h2></div>
+        </div>
+      </div>
+    </div>
+    </body></html>"""
+    f = tmp_path / "runcell.html"
+    f.write_text(html, encoding="utf-8")
+
+    result = parse_submission(str(f))
+    assert result["metadata"]["template"] == "classic"
+    code_cell = result["cells"][0]
+    assert code_cell["cell_type"] == "code"
+    assert "import numpy as np" in code_cell["source"]
+    # The prompt label must not have been picked up as the source, and
+    # must not survive inside it either.
+    assert "In [2]:" not in code_cell["source"]
+    assert code_cell["outputs"] == ["Setup complete."]
+    assert result["cells"][1]["cell_type"] == "markdown"
+    assert "Step 1" in result["cells"][1]["source"]
+
+
+def test_html_bare_section_cells_with_execution_marker(tmp_path):
+    """
+    A converter that wraps each cell in a plain <section class="cell">,
+    marks the execution count in its own <div>, and puts the output in a
+    <div class="output"> right after the code <pre> - with no "input"-ish
+    class anywhere, so the source has to be found by elimination (the
+    first <pre> that is not itself inside the output block).
+    """
+    from backend.parsers import parse_submission
+
+    html = """<html><body>
+    <section class="cell"><h3>Step 0</h3><p>Setup.</p></section>
+    <section class="cell">
+      <div class="execution">In [1]</div>
+      <pre><code>data = load()
+print(data.shape)</code></pre>
+      <div class="output"><pre>(20640, 9)
+</pre></div>
+    </section>
+    </body></html>"""
+    f = tmp_path / "section_cells.html"
+    f.write_text(html, encoding="utf-8")
+
+    result = parse_submission(str(f))
+    assert result["metadata"]["template"] == "classic"
+    cells = result["cells"]
+    assert cells[0]["cell_type"] == "markdown"
+    code_cell = cells[1]
+    assert code_cell["cell_type"] == "code"
+    assert "data = load()" in code_cell["source"]
+    assert "(20640, 9)" not in code_cell["source"]      # output, not source
+    assert code_cell["outputs"] == ["(20640, 9)"]
+
+
+def test_html_pandoc_style_syntax_highlighting_is_not_mangled(tmp_path):
+    """
+    Quarto/Pandoc's notebook filter puts one <span> per syntax-highlighted
+    token, e.g. `from` and `pathlib` are two separate spans on the same
+    source line. Extracting a code block's text with a newline inserted
+    between every text fragment - the right thing to do for a markdown
+    cell built from block-level tags - tears code like this apart into
+    one token per line instead of preserving the real line breaks that
+    are already there in the raw HTML.
+    """
+    from backend.parsers import parse_submission
+
+    html = """<html><body>
+    <section class="cell markdown"><h2>Setup</h2></section>
+    <div class="cell code" data-execution_count="1">
+      <div class="sourceCode" id="cb1"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1"></a><span class="im">from</span> pathlib <span class="im">import</span> Path</span>
+<span id="cb1-2"><a href="#cb1-2"></a><span class="im">import</span> numpy <span class="im">as</span> np</span></code></pre></div>
+      <div class="output stream stdout"><pre>Setup complete.
+</pre></div>
+    </div>
+    </body></html>"""
+    f = tmp_path / "pandoc.html"
+    f.write_text(html, encoding="utf-8")
+
+    result = parse_submission(str(f))
+    code_cell = next(c for c in result["cells"] if c["cell_type"] == "code")
+    assert code_cell["source"] == (
+        "from pathlib import Path\nimport numpy as np"
+    )
+    assert code_cell["outputs"] == ["Setup complete."]
+
+
+def test_html_no_cell_wrapper_falls_back_to_generic_but_still_pairs_outputs(tmp_path):
+    """
+    Some converters use no "cell" class at all - just bare <section>
+    elements, an execution-count <div>, and a <pre class="output"> right
+    after the code. With no wrapper to group by, the generic fallback has
+    to reconstruct cell boundaries itself: each non-output <pre> starts a
+    new cell, and any output-ish block between it and the next <pre>
+    belongs to it.
+    """
+    from backend.parsers import parse_submission
+
+    html = """<html><body>
+    <section><div class="cell-label">In [1]</div>
+      <pre><code>print("first")</code></pre><pre class="output">first
+</pre>
+    </section>
+    <section><h3>A heading between cells</h3></section>
+    <section><div class="cell-label">In [2]</div>
+      <pre><code>print("second")</code></pre><pre class="output">second
+</pre>
+    </section>
+    </body></html>"""
+    f = tmp_path / "no_wrapper.html"
+    f.write_text(html, encoding="utf-8")
+
+    result = parse_submission(str(f))
+    assert result["metadata"]["template"] == "generic"
+    code_cells = [c for c in result["cells"] if c["cell_type"] == "code"]
+    assert len(code_cells) == 2
+    assert code_cells[0]["source"] == 'print("first")'
+    assert code_cells[0]["outputs"] == ["first"]
+    assert code_cells[1]["source"] == 'print("second")'
+    assert code_cells[1]["outputs"] == ["second"]
+    assert "A heading between cells" in result["markdown"]
+
+
+def test_html_a_structurally_matched_but_empty_template_falls_through(tmp_path):
+    """
+    The core safety property: a template that finds cell-shaped elements
+    but extracts nothing real from any of them must not be trusted just
+    because it matched structurally - otherwise a converter this codebase
+    has never seen parses "successfully" to a blank submission instead of
+    falling through to a tier that can actually read it.
+    """
+    from backend.parsers import parse_submission
+
+    # `.cell` divs exist (so _parse_classic matches structurally) but carry
+    # no text of their own at all - only a decorative icon - so every cell
+    # it builds is genuinely empty. The bare <pre> outside any `.cell`
+    # wrapper is the only real content in the document, and only the
+    # generic tier looks outside matched cells for it.
+    html = """<html><body>
+    <div class="cell widget-1"><img src="icon.png"></div>
+    <div class="cell widget-2"><img src="icon.png"></div>
+    <pre><code>print("real code, elsewhere in the page")</code></pre>
+    </body></html>"""
+    f = tmp_path / "empty_classic.html"
+    f.write_text(html, encoding="utf-8")
+
+    result = parse_submission(str(f))
+    assert result["metadata"]["template"] == "generic"
+    assert "real code, elsewhere in the page" in result["code"]

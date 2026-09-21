@@ -376,6 +376,7 @@ Respond with a single JSON object and nothing else."""
 def build_rubric_from_solution_prompt(
     parsed: dict[str, Any],
     total_points: float | None,
+    instructions: str | None = None,
     max_chars: int = 60_000,
 ) -> str:
     """Render an instructor solution as the input for rubric extraction."""
@@ -393,10 +394,25 @@ def build_rubric_from_solution_prompt(
         f"recorded outputs: {stats.get('n_outputs', 0)}, "
         f"figures: {stats.get('n_images', 0)}\n\n",
         _render_cells(parsed, limit=max_chars),
+    ]
+    if instructions and instructions.strip():
+        # Free text the professor typed alongside the upload - the only way
+        # to tell the model something the solution file cannot show on its
+        # own: how strictly to mark a section, marks per question, parts to
+        # skip, tone of feedback. Placed as its own section, ahead of the
+        # task line, so it reads as a direct instruction rather than one
+        # more fact about the solution.
+        parts.append(
+            "\n\n# Additional instructions from the professor\n\n"
+            "These take priority over anything you would otherwise infer "
+            "from the solution file alone:\n\n"
+            f"{instructions.strip()}\n"
+        )
+    parts.append(
         "\n\n# Your task\n\nBuild a grading rubric a teaching assistant can "
         "apply to student submissions of this assignment, following the rules "
-        f"above. {target}",
-    ]
+        f"above. {target}"
+    )
     return "".join(parts)
 
 

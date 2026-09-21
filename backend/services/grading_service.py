@@ -391,6 +391,50 @@ def apply_overrides(
     return grade
 
 
+def set_total_override(
+    db: Session,
+    grade: GradeResult,
+    value: float | None,
+) -> GradeResult:
+    """
+    Set (or clear) a hand-entered final score, bypassing the per-criterion
+    breakdown, and recompute the totals from it.
+
+    `value` is the final score out of `total_possible`; passing None clears
+    the manual total and reverts to the criterion-based score. The criterion
+    scores and any per-criterion overrides are left untouched - they stay in
+    place for the audit trail, they just no longer drive the total while a
+    manual score is in effect.
+    """
+    if grade.finalized:
+        raise ValueError(
+            "This grade is finalized. Un-finalize it before editing scores."
+        )
+
+    if value is not None:
+        value = float(value)
+        total_possible = float(grade.total_possible or 0)
+        if value < 0:
+            raise ValueError(f"A score cannot be negative; {value:g} was given.")
+        if total_possible and value > total_possible:
+            raise ValueError(
+                f"The score caps at {total_possible:g} points; {value:g} was given."
+            )
+
+    grade.total_override = value
+
+    total = grade.effective_score
+    total_possible = float(grade.total_possible or 0)
+    grade.total_score = round(total, 2)
+    grade.percentage = round(total / total_possible * 100, 2) if total_possible else 0.0
+    grade.letter_grade = letter_grade(grade.percentage)
+
+    grade.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(grade)
+    return grade
+
+
 def finalize_grade(db: Session, grade: GradeResult, finalized: bool = True) -> GradeResult:
     """Approve (or un-approve) a grade. Only a professor may call this."""
     grade.finalized = finalized
@@ -399,6 +443,42 @@ def finalize_grade(db: Session, grade: GradeResult, finalized: bool = True) -> G
     db.commit()
     db.refresh(grade)
     return grade
+
+
+def finalize_all(
+    db: Session,
+    assignment: Assignment,
+    *,
+    skip_flagged: bool = True,
+) -> int:
+    """
+    Approve every not-yet-approved grade in an assignment in one pass, and
+    return how many were approved.
+
+    With `skip_flagged` (the default) a grade the grader raised any flag on is
+    left alone - those are the ones a professor should read individually - so
+    this only clears the routine, unflagged backlog. Only a professor may call
+    this (enforced at the route).
+    """
+    rows = (
+        db.query(GradeResult)
+        .join(Submission, GradeResult.submission_id == Submission.id)
+        .filter(Submission.assignment_id == assignment.id)
+        .filter(GradeResult.finalized.is_(False))
+        .all()
+    )
+    now = datetime.utcnow()
+    count = 0
+    for grade in rows:
+        if skip_flagged and (grade.flags or []):
+            continue
+        grade.finalized = True
+        grade.finalized_at = now
+        grade.updated_at = now
+        count += 1
+    if count:
+        db.commit()
+    return count
 
 
 # ---------------------------------------------------------------------

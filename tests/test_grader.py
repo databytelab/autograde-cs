@@ -383,6 +383,51 @@ def test_extract_rubric_from_solution_reads_the_solution(mock_claude, parsed):
     assert "worked solution" in prompt.lower()
 
 
+def test_extract_rubric_from_solution_passes_through_the_professors_instructions(
+        mock_claude, parsed):
+    """
+    Free text the professor types alongside the solution upload - the only
+    way to tell the model something the file itself cannot show (marks per
+    question, a section to grade leniently) - has to actually reach the
+    model, and be marked as taking priority rather than just tacked on.
+    """
+    from backend.ai.grader import extract_rubric_from_solution
+
+    fake = mock_claude({
+        "title": "From solution", "total_points": 100,
+        "criteria": [{"id": "c1", "name": "C1", "description": "d",
+                      "max_points": 100, "keywords": [], "requires_output": False}],
+        "grading_notes": "",
+    })
+    extract_rubric_from_solution(
+        parsed, total_points=100,
+        instructions="There are 20 questions, worth 5 points each. "
+                    "Grade Question 12 leniently.")
+
+    prompt = next(b["text"] for b in fake.calls[0]["messages"][0]["content"]
+                 if b["type"] == "text")
+    assert "Grade Question 12 leniently" in prompt
+    assert "take priority" in prompt.lower()
+
+
+def test_extract_rubric_from_solution_without_instructions_omits_the_section(
+        mock_claude, parsed):
+    """No stray "Additional instructions" heading when nothing was typed."""
+    from backend.ai.grader import extract_rubric_from_solution
+
+    fake = mock_claude({
+        "title": "From solution", "total_points": 100,
+        "criteria": [{"id": "c1", "name": "C1", "description": "d",
+                      "max_points": 100, "keywords": [], "requires_output": False}],
+        "grading_notes": "",
+    })
+    extract_rubric_from_solution(parsed, total_points=100, instructions="   ")
+
+    prompt = next(b["text"] for b in fake.calls[0]["messages"][0]["content"]
+                 if b["type"] == "text")
+    assert "Additional instructions" not in prompt
+
+
 # ---------------------------------------------------------------------
 # A model that answers about criteria of its own invention
 # ---------------------------------------------------------------------

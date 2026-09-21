@@ -20,11 +20,14 @@ from backend.schemas.grade_result import (
     GradeResultDetail,
     GradeResultOut,
     OverrideRequest,
+    TotalOverrideRequest,
 )
 from backend.services.grading_service import (
     apply_overrides,
     assignment_stats,
+    finalize_all,
     finalize_grade,
+    set_total_override,
 )
 from backend.utils.auth_utils import require_professor
 
@@ -124,6 +127,37 @@ def override_scores(
     return out
 
 
+@router.patch("/results/{grade_id}/total-override", response_model=GradeResultOut)
+def override_total(
+    payload: TotalOverrideRequest,
+    grade: GradeResult = Depends(get_owned_grade),
+    db: Session = Depends(get_db),
+) -> GradeResultOut:
+    """
+    Set the final score by hand, or clear it (value=null) to go back to the
+    criterion-based score.
+
+    This is the fast path for a submission graded manually - the professor
+    enters one number instead of every section. The per-criterion scores are
+    kept for the audit trail; while a manual total is set it simply wins.
+    """
+    if grade.finalized:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This grade is finalized. Un-finalize it before editing scores.",
+        )
+    try:
+        updated = set_total_override(db, grade, payload.value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    out = GradeResultOut.model_validate(updated)
+    out.effective_score = updated.effective_score
+    return out
+
+
 @router.post("/results/{grade_id}/finalize", response_model=GradeResultOut)
 def finalize(
     payload: FinalizeRequest,
@@ -141,6 +175,24 @@ def finalize(
     out = GradeResultOut.model_validate(updated)
     out.effective_score = updated.effective_score
     return out
+
+
+@router.post("/assignments/{assignment_id}/finalize-all")
+def finalize_all_grades(
+    assignment: Assignment = Depends(get_owned_assignment),
+    db: Session = Depends(get_db),
+    _professor: User = Depends(require_professor),
+    skip_flagged: bool = True,
+) -> dict:
+    """
+    Approve every not-yet-approved grade in the assignment at once.
+
+    By default a flagged grade is skipped - those deserve an individual look -
+    so this clears the routine, unflagged backlog in one click. Professors
+    only, like single approval.
+    """
+    count = finalize_all(db, assignment, skip_flagged=skip_flagged)
+    return {"finalized": count}
 
 
 @router.get("/assignments/{assignment_id}/stats", response_model=AssignmentStats)

@@ -280,6 +280,33 @@ def test_rubric_from_solution_builds_a_rubric(client, professor, mock_claude):
     assert [c["id"] for c in body["criteria"]] == ["load", "model"]
 
 
+def test_rubric_from_solution_accepts_additional_instructions(client, professor, mock_claude):
+    """
+    The only way to tell the AI something the solution file itself can't
+    show - marks per question, a section to grade leniently - is free text
+    sent alongside the upload. It has to reach the model, not just be
+    silently accepted and dropped.
+    """
+    fake = mock_claude({
+        "title": "From solution", "total_points": 100, "grading_notes": "",
+        "criteria": [{"id": "load", "name": "Load data",
+                     "description": "Reads the dataset.", "max_points": 100,
+                     "keywords": [], "requires_output": False}],
+    })
+    data = (SAMPLES / "good_submission.ipynb").read_bytes()
+    response = client.post(
+        "/api/assignments/rubric/from-solution",
+        files={"file": ("solution.ipynb", data, "application/octet-stream")},
+        data={"total_points": "100",
+             "instructions": "20 questions, 5 points each."},
+        headers=professor["headers"],
+    )
+    assert response.status_code == 200, response.text
+    prompt = next(b["text"] for b in fake.calls[0]["messages"][0]["content"]
+                 if b["type"] == "text")
+    assert "20 questions, 5 points each." in prompt
+
+
 def test_rubric_from_solution_rejects_a_bad_file_type(client, professor):
     response = client.post(
         "/api/assignments/rubric/from-solution",
@@ -652,6 +679,124 @@ def test_finalize_then_override_is_blocked(client, professor, graded):
                         headers=professor["headers"]).status_code == 200
 
 
+def test_total_override_sets_the_final_score_directly(client, professor, graded):
+    """
+    The fast path for a manually-graded submission: enter one number and it
+    becomes the total, without touching any section. The AI's per-criterion
+    scores stay recorded for the audit trail.
+    """
+    grade_id = graded["result"]["id"]
+    response = client.patch(f"/api/results/{grade_id}/total-override",
+                            json={"value": 73}, headers=professor["headers"])
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["effective_score"] == 73.0
+    assert body["percentage"] == 73.0
+    assert body["total_override"] == 73.0
+    # The AI's own criterion scores are untouched.
+    ai_model = next(c for c in body["criteria_results"]
+                    if c["criterion_id"] == "model")
+    assert ai_model["score"] == 40.0
+
+
+def test_total_override_wins_over_criterion_overrides(client, professor, graded):
+    """
+    A manual final score beats the per-criterion numbers, even when the
+    professor has also overridden a criterion. Clearing it reverts to the
+    criterion-based total.
+    """
+    grade_id = graded["result"]["id"]
+    # First push a criterion override (would make the total 94).
+    client.patch(f"/api/results/{grade_id}/override",
+                 json={"overrides": {"model": {"new_score": 45}}},
+                 headers=professor["headers"])
+    # Now set a manual total - it must win.
+    manual = client.patch(f"/api/results/{grade_id}/total-override",
+                          json={"value": 50}, headers=professor["headers"])
+    assert manual.json()["effective_score"] == 50.0
+    assert manual.json()["percentage"] == 50.0
+
+    # Clearing it reverts to the criterion-based score (27 + 45 + 22 = 94).
+    cleared = client.patch(f"/api/results/{grade_id}/total-override",
+                           json={"value": None}, headers=professor["headers"])
+    assert cleared.json()["total_override"] is None
+    assert cleared.json()["effective_score"] == 94.0
+
+
+def test_total_override_rejects_out_of_range(client, professor, graded):
+    grade_id = graded["result"]["id"]
+    high = client.patch(f"/api/results/{grade_id}/total-override",
+                        json={"value": 250}, headers=professor["headers"])
+    assert high.status_code == 422
+    assert "caps at" in high.json()["detail"]
+
+    low = client.patch(f"/api/results/{grade_id}/total-override",
+                       json={"value": -5}, headers=professor["headers"])
+    assert low.status_code == 422
+    assert "negative" in low.json()["detail"]
+
+
+def test_total_override_blocked_when_finalized(client, professor, graded):
+    grade_id = graded["result"]["id"]
+    client.post(f"/api/results/{grade_id}/finalize", json={"finalized": True},
+                headers=professor["headers"])
+    blocked = client.patch(f"/api/results/{grade_id}/total-override",
+                           json={"value": 60}, headers=professor["headers"])
+    assert blocked.status_code == 409
+
+
+def test_finalize_all_approves_unflagged_and_is_idempotent(
+        client, professor, assignment, graded):
+    """
+    One click clears the unflagged backlog; running it again approves nothing.
+    """
+    resp = client.post(f"/api/assignments/{assignment['id']}/finalize-all",
+                       headers=professor["headers"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["finalized"] == 1
+
+    results = client.get(f"/api/assignments/{assignment['id']}/results",
+                        headers=professor["headers"]).json()
+    assert results and all(r["finalized"] for r in results)
+
+    again = client.post(f"/api/assignments/{assignment['id']}/finalize-all",
+                       headers=professor["headers"])
+    assert again.json()["finalized"] == 0
+
+
+def test_finalize_all_skips_flagged_unless_told_otherwise(
+        client, db_session, professor, assignment, mock_claude):
+    """
+    A flagged grade is left for individual review by default, but can be
+    swept in explicitly with skip_flagged=false.
+    """
+    mock_claude(grading_payload(flags=["possible_ai_generated"]))
+    upload_sample(client, assignment["id"], professor["headers"],
+                  "good_submission.ipynb")
+    grade_now(client, db_session, assignment["id"], professor["headers"])
+
+    default = client.post(f"/api/assignments/{assignment['id']}/finalize-all",
+                         headers=professor["headers"])
+    assert default.json()["finalized"] == 0
+
+    results = client.get(f"/api/assignments/{assignment['id']}/results",
+                        headers=professor["headers"]).json()
+    assert not any(r["finalized"] for r in results)
+
+    forced = client.post(
+        f"/api/assignments/{assignment['id']}/finalize-all?skip_flagged=false",
+        headers=professor["headers"])
+    assert forced.json()["finalized"] == 1
+
+
+def test_ta_cannot_bulk_finalize(client, ta, professor, assignment, graded):
+    """Bulk approval is a professor action, like single approval."""
+    resp = client.post(f"/api/assignments/{assignment['id']}/finalize-all",
+                       headers=ta["headers"])
+    # 404 because the TA does not own the course; 403 if they did.
+    assert resp.status_code in (403, 404)
+
+
 def test_ta_cannot_finalize(client, ta, graded):
     """A TA can grade but not approve - that is the whole role split."""
     response = client.post(f"/api/results/{graded['result']['id']}/finalize",
@@ -781,6 +926,34 @@ def test_export_of_an_empty_assignment_still_works(client, professor, assignment
         assert response.content
 
 
+def test_exports_reflect_a_manual_total(client, professor, assignment, graded):
+    """
+    A hand-entered final score must flow through to every export - the CSV
+    score column, the Canvas percentage, and the feedback PDF (which renders
+    the manual-total branch instead of a section breakdown that would not
+    add up to the total).
+    """
+    grade_id = graded["result"]["id"]
+    client.patch(f"/api/results/{grade_id}/total-override",
+                 json={"value": 55}, headers=professor["headers"])
+    client.post(f"/api/results/{grade_id}/finalize", json={"finalized": True},
+                headers=professor["headers"])
+
+    csv = client.get(
+        f"/api/assignments/{assignment['id']}/export?format=csv&only_finalized=true",
+        headers=professor["headers"],
+    )
+    assert csv.status_code == 200
+    assert "55" in csv.content.decode("utf-8-sig")
+
+    pdf = client.get(
+        f"/api/assignments/{assignment['id']}/export?format=pdf&only_finalized=true",
+        headers=professor["headers"],
+    )
+    assert pdf.status_code == 200
+    assert pdf.content[:4] == b"%PDF"
+
+
 # ---------------------------------------------------------------------
 # Canvas
 # ---------------------------------------------------------------------
@@ -807,3 +980,50 @@ def test_canvas_push_requires_ids(client, professor, assignment, graded):
     )
     assert response.status_code == 400
     assert "canvas_course_id" in response.json()["detail"]
+
+
+def test_canvas_comment_is_the_summary_only():
+    """
+    The comment pushed to a student in Canvas must be the overall summary
+    only - never the per-criterion breakdown, which belongs in AutoGrade's
+    own Review results and exports. A student reads a Canvas comment as one
+    paragraph, not a rubric table, and pasting every criterion's score and
+    feedback in there is what the professor asked us to stop doing.
+    """
+    from types import SimpleNamespace
+    from backend.routers.export import _canvas_comment
+
+    grade = SimpleNamespace(
+        summary_feedback="  Solid work. Expand your conclusion next time.  ",
+        # Populated on purpose: the helper must ignore these now, so that
+        # none of their names, scores, or feedback leak into the comment.
+        criteria_results=[
+            {"criterion_id": "loading", "name": "Data loading",
+             "score": 27, "max_score": 30,
+             "feedback": "You loaded the data correctly."},
+            {"criterion_id": "model", "name": "Model fitting",
+             "score": 40, "max_score": 45,
+             "feedback": "Good use of the pseudo-inverse."},
+        ],
+        professor_overrides={"loading": {"new_score": 30}},
+    )
+
+    comment = _canvas_comment(grade)
+    assert comment == "Solid work. Expand your conclusion next time."
+    assert "Per-criterion" not in comment
+    assert "Data loading" not in comment
+    assert "pseudo-inverse" not in comment
+
+
+def test_canvas_comment_is_empty_when_there_is_no_summary():
+    """
+    With no summary feedback, the comment is empty - and push_grades_bulk
+    only attaches a comment when it is non-empty, so the student's grade
+    still posts, just without a blank comment stapled to it.
+    """
+    from types import SimpleNamespace
+    from backend.routers.export import _canvas_comment
+
+    grade = SimpleNamespace(summary_feedback=None, criteria_results=[],
+                            professor_overrides={})
+    assert _canvas_comment(grade) == ""

@@ -180,28 +180,12 @@ def sync_roster(
 
 def _canvas_comment(grade) -> str:
     """
-    Compose the feedback comment posted to a student in Canvas: the overall
-    summary plus a per-criterion breakdown (with any professor override
-    applied). Canvas truncates very long comments; push_grades_bulk caps it.
+    The feedback comment posted to a student in Canvas: the overall summary
+    only. The per-criterion breakdown stays inside AutoGrade (Review results,
+    and the PDF/Excel exports) rather than going into Canvas, which a
+    student reads as one paragraph, not a rubric table.
     """
-    parts: list[str] = []
-    if grade.summary_feedback:
-        parts.append(grade.summary_feedback.strip())
-
-    overrides = grade.professor_overrides or {}
-    lines: list[str] = []
-    for criterion in grade.criteria_results or []:
-        cid = criterion.get("criterion_id")
-        score = overrides.get(cid, {}).get("new_score", criterion.get("score"))
-        line = (f"- {criterion.get('name')}: "
-                f"{float(score or 0):g}/{float(criterion.get('max_score', 0)):g}")
-        feedback = (criterion.get("feedback") or "").strip()
-        if feedback:
-            line += f" - {feedback}"
-        lines.append(line)
-    if lines:
-        parts.append("Per-criterion:\n" + "\n".join(lines))
-    return "\n\n".join(parts)
+    return (grade.summary_feedback or "").strip()
 
 
 @router.post("/assignments/{assignment_id}/canvas/push-grades", tags=["canvas"])

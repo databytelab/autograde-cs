@@ -106,10 +106,23 @@ elif method.startswith("Upload"):
     sol_points = st.number_input(
         "Total points", 1.0, 1000.0, 100.0, step=5.0, key="sol_points"
     )
+    sol_instructions = st.text_area(
+        "Additional instructions (optional)",
+        key="sol_instructions", height=100,
+        placeholder=(
+            "Anything the solution file itself can't show: e.g. \"20 "
+            "questions, 5 points each\", \"grade Question 12 leniently - "
+            "several approaches are acceptable\", \"ignore the AI-use "
+            "section, it is not marked\"."
+        ),
+        help="Sent to the AI alongside your solution file, and takes "
+             "priority over anything it would otherwise assume.",
+    )
     if st.button("Build rubric from solution", type="primary",
                  disabled=solution_file is None):
         with st.spinner("Reading your solution and building the rubric..."):
-            draft = api_client.preview_rubric_from_solution(solution_file, sol_points)
+            draft = api_client.preview_rubric_from_solution(
+                solution_file, sol_points, sol_instructions)
         if draft:
             st.session_state["draft_rubric"] = draft
             st.session_state["draft_raw_text"] = None

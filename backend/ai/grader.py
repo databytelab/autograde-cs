@@ -314,6 +314,7 @@ def extract_rubric_from_text(
 def extract_rubric_from_solution(
     parsed: dict[str, Any],
     total_points: float | None = None,
+    instructions: str | None = None,
     provider: Any = None,
 ) -> dict[str, Any]:
     """
@@ -322,11 +323,15 @@ def extract_rubric_from_solution(
     Reads the parsed solution (code, prose, outputs) and derives grading
     criteria that judge the underlying work rather than an exact code/output
     match - students implement differently and their output legitimately
-    varies. Returns the RAW extracted dict; the caller validates it.
+    varies. `instructions` is free text the professor typed alongside the
+    upload, for anything the solution file itself cannot show (how strictly
+    to mark a section, marks per question, parts to skip). Returns the RAW
+    extracted dict; the caller validates it.
     """
     ai_output, _usage = (provider or get_provider()).complete_json(
         system=prompts.RUBRIC_FROM_SOLUTION_SYSTEM,
-        user_prompt=prompts.build_rubric_from_solution_prompt(parsed, total_points),
+        user_prompt=prompts.build_rubric_from_solution_prompt(
+            parsed, total_points, instructions),
         schema=prompts.RUBRIC_RESPONSE_SCHEMA,
         effort="medium",
         purpose="rubric",

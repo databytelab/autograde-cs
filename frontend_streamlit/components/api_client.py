@@ -245,12 +245,16 @@ def preview_rubric(text: str, total_points: float | None = None):
                     json={"text": text, "total_points": total_points})
 
 
-def preview_rubric_from_solution(file, total_points: float = 100.0):
+def preview_rubric_from_solution(file, total_points: float = 100.0,
+                                 instructions: str | None = None):
     """Upload an instructor solution file; the backend builds a rubric from it."""
+    data = {"total_points": str(total_points)}
+    if instructions and instructions.strip():
+        data["instructions"] = instructions.strip()
     return api_call(
         "POST", "/api/assignments/rubric/from-solution", timeout=300,
         files={"file": (file.name, file.getvalue())},
-        data={"total_points": str(total_points)},
+        data=data,
     )
 
 
@@ -353,9 +357,29 @@ def override(grade_id: str, overrides: dict, summary_feedback: str | None = None
     return api_call("PATCH", f"/api/results/{grade_id}/override", json=payload)
 
 
+def set_total_override(grade_id: str, value: float | None):
+    """
+    Set a submission's final score directly (out of its total), or clear it
+    with value=None to revert to the criterion-based score.
+    """
+    return api_call("PATCH", f"/api/results/{grade_id}/total-override",
+                    json={"value": value})
+
+
 def finalize(grade_id: str, finalized: bool = True):
     return api_call("POST", f"/api/results/{grade_id}/finalize",
                     json={"finalized": finalized})
+
+
+def finalize_all(assignment_id: str, skip_flagged: bool = True):
+    """
+    Approve every not-yet-approved grade in an assignment at once (flagged
+    ones skipped by default). Returns {"finalized": <count>}.
+    """
+    return api_call(
+        "POST", f"/api/assignments/{assignment_id}/finalize-all",
+        params={"skip_flagged": str(skip_flagged).lower()},
+    )
 
 
 # ---------------------------------------------------------------------

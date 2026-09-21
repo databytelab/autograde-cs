@@ -240,6 +240,7 @@ def preview_rubric(payload: RubricPreviewRequest,
 def rubric_from_solution(
     file: UploadFile = File(...),
     total_points: float = Form(100.0),
+    instructions: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
@@ -248,9 +249,13 @@ def rubric_from_solution(
 
     The file is parsed and read by the model, which derives grading criteria
     that judge the underlying work rather than an exact match - student code
-    and output legitimately vary. Nothing is saved: the professor reviews the
-    result, then creates the assignment with it (and can attach the same file
-    as the reference solution for grading).
+    and output legitimately vary. `instructions` is optional free text from
+    the professor, for anything the solution file cannot show on its own
+    (how strictly to mark a section, marks per question, parts to skip) -
+    it takes priority over what the model would otherwise infer. Nothing is
+    saved: the professor reviews the result, then creates the assignment
+    with it (and can attach the same file as the reference solution for
+    grading).
     """
     try:
         path, _size, _ftype = save_upload(
@@ -268,7 +273,7 @@ def rubric_from_solution(
     try:
         parsed = parse_submission(path)
         rubric = build_rubric_from_solution(
-            parsed, total_points=total_points,
+            parsed, total_points=total_points, instructions=instructions,
             provider=_provider_for(db, current_user))
     except ParseError as exc:
         raise HTTPException(

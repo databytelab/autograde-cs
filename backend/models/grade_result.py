@@ -36,6 +36,12 @@ class GradeResult(Base):
     # Professor's manual overrides
     # Schema: {"criterion_id": {"new_score": x, "note": "..."}, ...}
     professor_overrides = Column(JSON, nullable=True)
+    # A final score entered by hand, bypassing the per-criterion breakdown.
+    # When set it wins over the criteria (see effective_score); NULL means
+    # "compute from the criteria as usual". Used for submissions graded
+    # manually - e.g. one whose HTML converted badly - where the professor
+    # wants to enter one number, not fill in every section.
+    total_override     = Column(Numeric(6, 2), nullable=True)
     # Overall feedback paragraph shown to student
     summary_feedback   = Column(Text, nullable=True)
     # Whether professor has approved this grade
@@ -53,7 +59,14 @@ class GradeResult(Base):
         """
         Returns the final score after applying professor overrides.
         If no overrides exist, returns the AI-generated total.
+
+        A hand-entered `total_override` wins over everything: when the
+        professor has set a final score directly, that is the score, and
+        the per-criterion numbers - AI or overridden - are kept only for
+        the audit trail.
         """
+        if self.total_override is not None:
+            return float(self.total_override)
         if not self.professor_overrides or not self.criteria_results:
             return float(self.total_score or 0)
         # Recalculate from per-criterion scores + overrides

@@ -29,6 +29,10 @@ class GradeResultOut(BaseModel):
     criteria_results: list[CriterionResult] | None = None
     flags: list[str] = Field(default_factory=list)
     professor_overrides: dict[str, Any] | None = None
+    # A hand-entered final score. When present it is the score, and the
+    # per-criterion numbers are audit trail only. None means the score is
+    # computed from the criteria.
+    total_override: float | None = None
     summary_feedback: str | None = None
     finalized: bool = False
     finalized_at: datetime | None = None
@@ -62,6 +66,20 @@ class OverrideRequest(BaseModel):
     summary_feedback: str | None = Field(
         default=None,
         description="Replace the AI's summary paragraph. Omit to keep it.",
+    )
+
+
+class TotalOverrideRequest(BaseModel):
+    """
+    Set a submission's final score directly, out of its total_possible.
+
+    `value` is None to clear the manual total and revert to the
+    criterion-based score. The bound is checked server-side against the
+    rubric total, so a value over the maximum is rejected there.
+    """
+    value: float | None = Field(
+        default=None,
+        description="The final score, or null to clear the manual total.",
     )
 
 

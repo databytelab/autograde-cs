@@ -94,6 +94,10 @@ def collect_rows(
             "submission_id": submission.id,
             "criteria": (grade.criteria_results or []) if grade else [],
             "overrides": (grade.professor_overrides or {}) if grade else {},
+            # True when the score was entered by hand, bypassing the
+            # sections - the per-criterion breakdown then does not sum to
+            # the total and is left out of the student-facing PDF.
+            "manual_total": bool(grade and grade.total_override is not None),
         }
         rows.append(row)
 
@@ -297,7 +301,15 @@ def to_pdf(
             story.append(Paragraph(_escape(row["summary_feedback"]), body))
             story.append(Spacer(1, 10))
 
-        if row["criteria"]:
+        if row.get("manual_total"):
+            # The final score was entered by hand; the AI's section scores
+            # do not add up to it, so showing them next to the total would
+            # only confuse the student. State plainly that it was graded
+            # manually instead.
+            story.append(Paragraph(
+                "This submission was graded manually and given an overall "
+                "score. A per-section breakdown is not shown.", small))
+        elif row["criteria"]:
             story.append(Paragraph("<b>Breakdown</b>", styles["Heading4"]))
             data: list[list[Any]] = [["Criterion", "Score", "Feedback"]]
             for criterion in row["criteria"]:
