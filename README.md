@@ -12,27 +12,29 @@ It runs on your own computer. Your students' work stays there.
 
 ## Get AutoGrade
 
-There are two ways to get it. Most people want the first.
+### Clone the repository and run it
 
-### 1. Download and run it (for teachers — no coding)
-
-1. Go to the **[Releases page](../../releases/latest)**.
-2. Under **Assets**, download **`autograde-v1.0.0.zip`**.
-3. Right-click the ZIP → **Extract All…** into a folder you won't delete (Documents is fine).
-4. Open the new folder and follow **[INSTALL.md](INSTALL.md)** — you install one free program (Docker Desktop) and double-click **Start AutoGrade**. About 30 minutes, most of it waiting for a download.
-
-That's the whole installation. You never edit a settings file or type a command.
-
-### 2. Run it from the source code (for developers)
+You need **Git** and **Docker Desktop** installed (both free). Then:
 
 ```bash
 git clone https://github.com/databytelab/autograde-cs.git
 cd autograde-cs
 ```
 
-Then either:
-- **Docker (same as the ZIP):** double-click **Start AutoGrade** (Windows) or run `./autograde.sh start` (Mac/Linux).
-- **From a Python virtualenv, with hot-reload for development:** double-click **Start Dev.bat**, or see **[docs/developer/DEVELOPMENT.md](docs/developer/DEVELOPMENT.md)**.
+Now start it:
+- **Windows:** double-click **`Start AutoGrade`** in the folder.
+- **Mac / Linux:** run `./autograde.sh start`.
+
+The first start downloads and builds everything (5–10 minutes, once); after that it takes about twenty seconds. Your browser opens AutoGrade by itself. Full step-by-step, including installing Docker Desktop, is in **[INSTALL.md](INSTALL.md)**.
+
+Developing on AutoGrade itself? Run it from a Python virtualenv with hot-reload — double-click **`Start Dev.bat`**, or see **[docs/developer/DEVELOPMENT.md](docs/developer/DEVELOPMENT.md)**.
+
+### Want a ready-made, click-and-install package?
+
+If you don't want to install Git or clone anything, there is a single ZIP that you just unzip and run (you still install the free Docker Desktop). It isn't posted here — **contact the maintainer** to get it:
+
+- Open an issue on this repository, or
+- Reach out to the repository owner, **[@databytelab](https://github.com/databytelab)**.
 
 ---
 

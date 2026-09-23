@@ -29,14 +29,18 @@ Docker is the program that runs AutoGrade. You install it once and never think a
 
 ## Step 2 — Put AutoGrade somewhere sensible
 
-1. Get the AutoGrade ZIP:
-   - If someone gave you the ZIP file, use that; **or**
-   - Download it yourself from the project's **Releases** page — open the repository on GitHub, click **Releases**, and under the latest release's **Assets** download **`autograde-v1.0.0.zip`**.
-2. Right-click the ZIP → **Extract All…**
-3. Choose a folder you will not accidentally delete — `Documents` is a good choice, the Desktop is fine too
-4. Click **Extract**
+Get the AutoGrade files one of two ways:
 
-**Expected result:** a folder named `autograde-v1.0.0` containing files including **Start AutoGrade**.
+**A. You were given the ready-made ZIP** (from the maintainer)
+1. Right-click the ZIP → **Extract All…**
+2. Choose a folder you will not accidentally delete — `Documents` is a good choice, the Desktop is fine too
+3. Click **Extract**
+
+**B. You are cloning it from GitHub** (needs [Git](https://git-scm.com/downloads))
+1. Open a terminal in a folder you won't delete (Documents is fine)
+2. Run: `git clone https://github.com/databytelab/autograde-cs.git`
+
+**Expected result either way:** a folder (named `autograde-...` or `autograde-cs`) containing files including **Start AutoGrade**.
 
 > Never move this folder while AutoGrade is running. If you do need to move
 > it later, close AutoGrade first (**Stop AutoGrade**), move it, then start
