@@ -29,6 +29,7 @@ rubric engine, and most of the test-suite depend on that.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from backend.ai import prompts
@@ -113,6 +114,30 @@ def _clean_flags(raw: Any) -> list[str]:
     })
 
 
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
+
+
+def _cap_words(text: str, limit: int) -> str:
+    """
+    Keep student-facing feedback short. Trim `text` to at most `limit` words,
+    backing up to the last sentence end so it never cuts a sentence in half;
+    if there is no sentence break, cut at the limit and mark it with an
+    ellipsis. This is a safety net behind the prompt's word limits, not a
+    substitute for them.
+    """
+    if not text:
+        return text
+    words = text.split()
+    if len(words) <= limit:
+        return text
+    clipped = " ".join(words[:limit])
+    ends = list(_SENTENCE_END.finditer(clipped))
+    # Only honour a sentence break if it keeps a reasonable amount of the text.
+    if ends and ends[-1].end() >= len(clipped) * 0.5:
+        return clipped[: ends[-1].end()].strip()
+    return clipped.rstrip(",;:") + "…"
+
+
 def normalize_grade(
     ai_output: dict[str, Any],
     rubric: dict[str, Any],
@@ -171,7 +196,7 @@ def normalize_grade(
             "score": round(clamped, 2),
             "max_score": max_points,
             "reasoning": str(item.get("reasoning") or "").strip(),
-            "feedback": str(item.get("feedback") or "").strip(),
+            "feedback": _cap_words(str(item.get("feedback") or "").strip(), 40),
             "flags": sorted(set(item_flags)),
         })
         flags.update(item_flags)
@@ -215,7 +240,15 @@ def normalize_grade(
         "letter_grade": letter_grade(percentage),
         "criteria_results": criteria_results,
         "flags": sorted(flags),
-        "summary_feedback": str(ai_output.get("summary_feedback") or "").strip(),
+        # Safety-net cap behind the prompt's word limit. 70 words leaves room
+        # for a summary that names the specific weak questions on a 20-part
+        # lab, which the professor asked us not to omit. Never trim the
+        # injected "rubric_ignored" notice, which must keep its fix-it advice.
+        "summary_feedback": (
+            str(ai_output.get("summary_feedback") or "").strip()
+            if "rubric_ignored" in flags
+            else _cap_words(str(ai_output.get("summary_feedback") or "").strip(), 70)
+        ),
     }
 
 

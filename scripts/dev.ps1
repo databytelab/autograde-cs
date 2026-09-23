@@ -138,7 +138,11 @@ function Do-Start {
     OK "Worker (silent until you grade something - that is correct)"
 
     Say "  Starting the interface..."
-    Start-Process $Python "-m streamlit run frontend_streamlit/app.py" `
+    # --server.headless true stops Streamlit from opening its OWN browser tab;
+    # we open exactly one below (Start-Process $Url). Without it you get two
+    # tabs of the same interface.
+    Start-Process $Python `
+        "-m streamlit run frontend_streamlit/app.py --server.headless true" `
         -WorkingDirectory $Root -WindowStyle Minimized
     if (-not (Wait-Url $Url)) {
         Warn "The interface is taking longer than usual. Try $Url in a minute."

@@ -10,9 +10,29 @@ It runs on your own computer. Your students' work stays there.
 
 ---
 
-## Start here
+## Get AutoGrade
 
-**[INSTALL.md](INSTALL.md)** — install it in about 30 minutes, most of that waiting for a download. You install one program and double-click one file.
+There are two ways to get it. Most people want the first.
+
+### 1. Download and run it (for teachers — no coding)
+
+1. Go to the **[Releases page](../../releases/latest)**.
+2. Under **Assets**, download **`autograde-v1.0.0.zip`**.
+3. Right-click the ZIP → **Extract All…** into a folder you won't delete (Documents is fine).
+4. Open the new folder and follow **[INSTALL.md](INSTALL.md)** — you install one free program (Docker Desktop) and double-click **Start AutoGrade**. About 30 minutes, most of it waiting for a download.
+
+That's the whole installation. You never edit a settings file or type a command.
+
+### 2. Run it from the source code (for developers)
+
+```bash
+git clone https://github.com/databytelab/autograde-cs.git
+cd autograde-cs
+```
+
+Then either:
+- **Docker (same as the ZIP):** double-click **Start AutoGrade** (Windows) or run `./autograde.sh start` (Mac/Linux).
+- **From a Python virtualenv, with hot-reload for development:** double-click **Start Dev.bat**, or see **[docs/developer/DEVELOPMENT.md](docs/developer/DEVELOPMENT.md)**.
 
 ---
 

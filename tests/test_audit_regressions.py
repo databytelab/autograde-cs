@@ -163,6 +163,83 @@ def test_grading_system_prompt_defends_against_prompt_injection():
     assert "prompt_injection" in prompts.GRADING_SYSTEM or "injection" in system
 
 
+def test_grading_prompt_demands_specific_plain_summaries():
+    """
+    The overall summary used to come back as interchangeable stock praise.
+    The prompt must now tie it to the concrete findings, in plain language,
+    and forbid reusing the same lines for everyone - otherwise the feature
+    quietly regresses to generic paragraphs.
+    """
+    from backend.ai import prompts
+
+    system = prompts.GRADING_SYSTEM.lower()
+    # Written last, from the actual per-criterion findings.
+    assert "summary_feedback" in prompts.GRADING_SYSTEM
+    assert "last" in system and "found" in system
+    # Plain, human voice; no stock phrases; specific enough to act on.
+    assert "everyday words" in system or "plain" in system
+    assert "cliche" in system or "stock" in system
+    assert "specifically" in system or "specific" in system
+    # Two different submissions must not get the same summary.
+    assert "different" in system
+
+    # The per-submission task line also points the model at the specifics.
+    prompt = prompts.build_grading_user_prompt(
+        assignment_name="HW", assignment_description=None,
+        rubric={"total_points": 10, "criteria": [
+            {"id": "c1", "name": "C1", "max_points": 10, "description": ""}]},
+        parsed={"file_type": "ipynb", "cells": [], "stats": {}, "metadata": {}},
+    )
+    assert "summary_feedback" in prompt and "generic" in prompt.lower()
+
+
+def test_grading_prompt_enforces_simple_english_and_word_limits():
+    """
+    Feedback must be simple English for beginner, non-native readers, kept
+    short, with praise cliches banned - and the summary capped at 50 words.
+    """
+    from backend.ai import prompts
+
+    system = prompts.GRADING_SYSTEM.lower()
+    assert "simple english" in system
+    assert "second language" in system or "non-native" in system or "beginner" in system
+    # Praise cliches are explicitly banned.
+    for banned in ("excellent", "great job", "well done"):
+        assert banned in system            # named in the ban-list
+    # Length limits are stated.
+    assert "40-70" in system or "70 word" in system
+    assert "35 word" in system or "35 words" in system
+
+
+def test_grading_prompt_uses_retrospective_wording_no_resubmission():
+    """
+    Students cannot resubmit, so feedback must say what they SHOULD HAVE done
+    (past tense), never a present-tense 'add this now' instruction.
+    """
+    from backend.ai import prompts
+
+    system = prompts.GRADING_SYSTEM.lower()
+    assert "past tense" in system
+    assert "cannot resubmit" in system or "should have" in system
+    # The summary must name the specific weak areas, not stay vague.
+    assert "name" in system and ("questions" in system or "topics" in system)
+
+
+def test_rubric_from_solution_maps_numbered_questions_to_criteria():
+    """
+    When the solution is organised as numbered questions each worth marks, the
+    builder must make one criterion per question (not collapse to 3-8 buckets),
+    so the rubric mirrors the professor's marking scheme.
+    """
+    from backend.ai import prompts
+
+    system = prompts.RUBRIC_FROM_SOLUTION_SYSTEM.lower()
+    assert "one criterion per" in system and "question" in system
+    assert "marks" in system
+    # It must explicitly refuse to cap the count for the per-question case.
+    assert "20 questions means 20 criteria" in system or "do not cap" in system
+
+
 def test_student_content_is_fenced_in_the_prompt():
     """The submission must be delimited so injected headings cannot pose as ours."""
     from backend.ai import prompts

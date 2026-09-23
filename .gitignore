@@ -30,6 +30,9 @@ uploads/
 # Local real sample data (student work / instructor solutions) - never publish
 Lab2_DT_Solution.html
 Lab2_Tasks_student_submission.html
+*Instructor_Solution*.ipynb
+*Instructor_Solutions*.ipynb
+scratch_*.txt
 
 # Logs
 *.log

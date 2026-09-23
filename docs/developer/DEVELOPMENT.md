@@ -173,7 +173,7 @@ A default, short, or placeholder `SECRET_KEY`; a SQLite or default `DATABASE_URL
 ## Building the release
 
 ```bash
-git tag -a v0.9.3-pilot -m "..."
+git tag -a v1.0.0 -m "..."
 ```
 
 ```bash

@@ -67,6 +67,41 @@ def test_normalize_computes_totals_in_python(rubric):
     assert result["letter_grade"] == "B+"
 
 
+def test_normalize_caps_feedback_and_summary_length(rubric):
+    """
+    Student-facing text is capped as a safety net behind the prompt's word
+    limits: per-criterion feedback to ~40 words, the summary to ~50, trimmed
+    at a sentence boundary so it never cuts a sentence in half.
+    """
+    long_sentence = ("This is a very wordy sentence that keeps going and going "
+                     "with many extra words. " * 6)
+    payload = grading_payload()
+    for crit in payload["criteria_results"]:
+        crit["feedback"] = long_sentence
+    payload["summary_feedback"] = long_sentence
+
+    result = normalize_grade(payload, rubric)
+    for crit in result["criteria_results"]:
+        assert len(crit["feedback"].split()) <= 40
+    assert len(result["summary_feedback"].split()) <= 70
+
+
+def test_normalize_does_not_cap_the_rubric_ignored_notice(rubric):
+    """
+    The injected 'the grader ignored your rubric' message must keep its
+    fix-it advice, so the 50-word cap must not truncate it.
+    """
+    payload = grading_payload()
+    # criterion ids the rubric does not contain -> triggers rubric_ignored
+    payload["criteria_results"] = [
+        {"criterion_id": "made_up_1", "name": "X", "score": 5, "max_score": 10,
+         "reasoning": "", "feedback": "", "flags": []},
+    ]
+    result = normalize_grade(payload, rubric)
+    assert "rubric_ignored" in result["flags"]
+    assert "Settings" in result["summary_feedback"]     # advice intact, untrimmed
+
+
 def test_normalize_ignores_model_arithmetic(rubric):
     """The model claiming a total does not make it so."""
     payload = grading_payload()
@@ -178,7 +213,10 @@ def test_grade_submission_happy_path(mock_claude, rubric, parsed):
     # exactly one API call, with the right shape
     assert len(fake.calls) == 1
     call = fake.calls[0]
-    assert call["model"] == "claude-opus-5"
+    # Whatever grading model is configured (opus, sonnet, ...) - not hard-coded,
+    # so switching the model in .env does not break the test.
+    from backend.config import settings
+    assert call["model"] == settings.anthropic_grading_model
     assert call["thinking"]["type"] == "adaptive"
     assert call["output_config"]["format"]["type"] == "json_schema"
     # the system prompt is cached so a batch reuses the prefix

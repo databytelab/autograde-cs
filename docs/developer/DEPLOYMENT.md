@@ -1,6 +1,6 @@
 # AutoGrade CS — deployment guide
 
-Release: **v0.9.3-pilot** — a release candidate for a single-department pilot.
+Release: **v1.0.0** — the first public release.
 
 The architecture reference: what runs, where the data is, and what can go
 wrong. One host, Docker Compose, PostgreSQL, and a background grading
@@ -47,7 +47,7 @@ called around the proxy.
 
 ```bash
 git clone <your-remote> autograde && cd autograde
-git checkout v0.9.3-pilot
+git checkout v1.0.0
 cp .env.example .env
 ```
 
@@ -215,7 +215,7 @@ first — it is the rollback.
 ### Rollback
 
 ```bash
-git checkout v0.9.3-pilot
+git checkout v1.0.0
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 

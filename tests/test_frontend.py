@@ -405,6 +405,31 @@ def test_dashboard_prompts_when_there_are_no_courses(fake_backend):
     assert any("no courses" in i.value.lower() for i in app.info)
 
 
+def test_dashboard_offers_delete_and_solution_management(fake_backend):
+    """
+    A professor must be able to delete a course or assignment and to attach
+    or replace a reference solution - none of which had any UI before.
+    """
+    fake_backend()
+    app = run_page(PAGES["dashboard"])
+    assert not app.exception
+    labels = " ".join(str(getattr(t, "label", "")) for t in app.toggle)
+    assert "Manage this assignment" in labels
+    assert "Delete course" in labels
+
+    # Opening the manage toggle reveals the solution uploader and delete button.
+    mng = [t for t in app.toggle if "Manage this assignment" in str(t.label)]
+    assert mng
+    mng[0].set_value(True).run()
+    assert not app.exception
+    uploader_labels = " ".join(
+        str(getattr(u, "label", "")) for u in app.get("file_uploader")
+    )
+    assert "reference solution" in uploader_labels.lower()
+    button_labels = " ".join(str(b.label) for b in app.button)
+    assert "Delete assignment" in button_labels
+
+
 # ---------------------------------------------------------------------
 # Upload & grade
 # ---------------------------------------------------------------------
@@ -473,6 +498,33 @@ def test_review_page_locks_scores_on_an_approved_grade(fake_backend):
     assert all(n.disabled for n in finalized_inputs)
 
 
+def test_review_page_advances_to_next_after_approve(fake_backend, monkeypatch):
+    """
+    Approving a submission should move the queue on to the next one, not snap
+    back to the top of the list.
+    """
+    fake_backend()
+    from frontend_streamlit.components import api_client
+
+    three = [
+        {**RESULTS[1], "id": f"g{i}", "flags": [], "finalized": False,
+         "student_name": f"Student {i}"}
+        for i in range(3)
+    ]
+    monkeypatch.setattr(api_client, "list_results", lambda *a, **k: three)
+
+    app = run_page(PAGES["review_results"])
+    assert "Student 0" in page_text(app)          # first in the queue shows
+
+    approve = [b for b in app.button
+               if b.label and "Approve" in b.label and "all" not in b.label.lower()]
+    assert approve, "the open submission should offer an Approve button"
+    approve[0].click().run()
+
+    # The selection moved on to the second submission, not back to the first.
+    assert app.session_state["rr_box_a1"] == "g1"
+
+
 def test_review_page_can_bulk_approve_unflagged(fake_backend, monkeypatch):
     """
     'Approve all' clears the graded, unflagged, not-yet-approved backlog in
@@ -517,8 +569,7 @@ def test_review_page_offers_a_direct_final_score(fake_backend):
         n for n in app.number_input if n.key and n.key.startswith("total_g2")
     ]
     assert total_inputs, "an editable result should offer a final-score field"
-    labels = " ".join(str(m.value) for m in app.markdown)
-    assert "Final score" in labels
+    assert "final score" in (total_inputs[0].label or "").lower()
 
 
 def test_review_page_locks_sections_under_a_manual_total(fake_backend, monkeypatch):

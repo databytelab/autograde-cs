@@ -29,12 +29,14 @@ Docker is the program that runs AutoGrade. You install it once and never think a
 
 ## Step 2 — Put AutoGrade somewhere sensible
 
-1. Find the AutoGrade ZIP file you were given
-2. Right-click it → **Extract All…**
+1. Get the AutoGrade ZIP:
+   - If someone gave you the ZIP file, use that; **or**
+   - Download it yourself from the project's **Releases** page — open the repository on GitHub, click **Releases**, and under the latest release's **Assets** download **`autograde-v1.0.0.zip`**.
+2. Right-click the ZIP → **Extract All…**
 3. Choose a folder you will not accidentally delete — `Documents` is a good choice, the Desktop is fine too
 4. Click **Extract**
 
-**Expected result:** a folder named `autograde-v0.9.3-pilot` containing files including **Start AutoGrade**.
+**Expected result:** a folder named `autograde-v1.0.0` containing files including **Start AutoGrade**.
 
 > Never move this folder while AutoGrade is running. If you do need to move
 > it later, close AutoGrade first (**Stop AutoGrade**), move it, then start
